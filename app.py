@@ -101,15 +101,14 @@ if ticker:
         "⚖️ Bewertung & Risiko"
     ])
 
-    # ==================== TAB 1: ÜBERBLICK ====================
     with tab1:
         st.subheader(f"{company_name} ({ticker})")
         st.caption(f"Sektor: {sector}")
 
         st.markdown(f"""
-        <div style="background:#1a2338; padding:1.4rem; border-radius:14px; text-align:center; border:2px solid {'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">
+        <div style="background:#1a2338; padding:1.5rem; border-radius:14px; text-align:center; border:2px solid {'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">
             <h2 style="margin:0; color:{'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">{score}/45</h2>
-            <p style="margin:0.4rem 0 0 0; font-size:1.1rem;">{status}</p>
+            <p style="margin:0.4rem 0 0 0; font-size:1.15rem;">{status}</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -118,7 +117,6 @@ if ticker:
         with c2: st.metric("FCF Yield", f"{round(fcf_yield, 1)}%")
         with c3: st.metric("Forward P/E", f"{round(pe_to_use, 1)}" if pe_to_use > 0 else "N/A")
 
-    # ==================== TAB 2: GROWTH CHART ====================
     with tab2:
         st.subheader("📈 5-Jahres-Growth Chart")
         hist['EMA200'] = hist['Close'].rolling(window=200).mean()
@@ -126,4 +124,38 @@ if ticker:
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'], name='Kurs', line=dict(color='#60a5fa', width=2.5)))
-        fig.add_trace(go.Scatter(x=hist.index, y=hist['
+        fig.add_trace(go.Scatter(x=hist.index, y=hist['EMA200'], name='EMA 200', line=dict(color='#fbbf24', dash='dot')))
+
+        fig.add_hrect(y0=0, y1=last_ema, fillcolor="rgba(34,197,94,0.18)", line_width=0, annotation_text="🟢 Kaufzone")
+        fig.add_hrect(y0=last_ema, y1=hist['Close'].max()*1.35, fillcolor="rgba(239,68,68,0.18)", line_width=0, annotation_text="🔴 Zu teuer")
+
+        fig.update_layout(height=460, template="plotly_dark", yaxis_type="log", hovermode="x unified")
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.caption("🟢 Unter EMA 200 = Kaufzone | 🔴 Über EMA 200 = Zu teuer")
+
+    with tab3:
+        st.subheader("💰 Finanzentwicklung")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("Oper. Cashflow", "N/A", "N/A")
+            st.metric("Free Cash Flow", "N/A", "N/A")
+        with c2:
+            st.metric("Gewinn je Aktie", "N/A", "N/A")
+            st.metric("Umsatz je Aktie", "N/A", "N/A")
+
+    with tab4:
+        st.subheader("📋 Bilanz & Struktur")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("Bruttomarge", f"{round(gross_margin, 1)}%")
+            st.metric("Debt/Equity", f"{round(debt_to_equity, 2)}×")
+        with c2:
+            st.metric("Beta", f"{round(beta, 2)}")
+
+    with tab5:
+        st.subheader("⚖️ Bewertung & Risiko")
+        st.metric("Trailing P/E", f"{round(trailing_pe, 1)}" if trailing_pe > 0 else "N/A")
+        st.metric("Forward P/E", f"{round(forward_pe, 1)}" if forward_pe > 0 else "N/A")
+
+    st.caption("Daten von Yahoo Finance • Keine Anlageberatung")
