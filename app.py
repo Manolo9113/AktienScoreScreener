@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
 import pandas as pd
+from datetime import datetime, timedelta
 
 st.set_page_config(
     page_title="Vigilanz-Cockpit",
@@ -10,11 +11,19 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# ==================== MOBILE CSS ====================
 st.markdown("""
 <style>
     .main { background: #0a0e27; color: #e8eef7; }
     h1 { font-size: 1.75rem; margin-bottom: 0.4rem; }
     .stTabs [data-baseweb="tab"] { font-size: 0.93rem; padding: 10px 12px; }
+    .metric-box { background: rgba(255,255,255,0.06); padding: 1rem; border-radius: 12px; margin: 0.5rem 0; }
+    .big-number { font-size: 2rem; font-weight: 700; }
+    
+    @media (max-width: 640px) {
+        h1 { font-size: 1.55rem; }
+        .big-number { font-size: 1.8rem; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -36,25 +45,25 @@ with st.sidebar:
                 ticker = t
                 st.rerun()
 
-# ==================== DATA LOADING mit besserer Fehlerbehandlung ====================
+# ==================== ROBUSTE DATA LOADING ====================
 if ticker:
-    with st.spinner(f"Lade {ticker}..."):
+    with st.spinner(f"Lade Daten für {ticker}..."):
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
             hist = stock.history(period="5y")
             
+            st.success(f"✅ Rohdaten von {ticker} erfolgreich geladen")
+            
             if hist.empty:
-                st.error(f"Keine Kursdaten für {ticker} gefunden.")
+                st.error(f"❌ Keine Kursdaten für {ticker} gefunden. yfinance hat leere Historie zurückgegeben.")
                 st.stop()
 
             current_price = float(hist['Close'].iloc[-1])
             company_name = info.get('longName', ticker)
             sector = info.get('sector', 'Technology')
 
-            fcf = info.get('freeCashflow', 0) or 0
-            market_cap = info.get('marketCap', 1) or 1
-            fcf_yield = (fcf / market_cap * 100) if market_cap > 0 else 0
+            fcf_yield = (info.get('freeCashflow', 0) / info.get('marketCap', 1) * 100) if info.get('marketCap', 1) > 0 else 0
             rev_growth = info.get('revenueGrowth', 0) * 100
             rule_of_40 = rev_growth + fcf_yield
             gross_margin = info.get('grossMargins', 0) * 100
@@ -65,8 +74,11 @@ if ticker:
             beta = info.get('beta', 1.0) or 1.0
             shares_outstanding = (info.get('sharesOutstanding', 0) or 0) / 1_000_000
 
+            st.info(f"✅ Verarbeitete Daten: Preis ${current_price:.2f}, Rule of 40 {round(rule_of_40, 1)}%")
+
         except Exception as e:
-            st.error(f"Fehler beim Laden von {ticker}: {str(e)[:100]}")
+            st.error(f"❌ Fehler beim Laden von {ticker}: {str(e)}")
+            st.info("Tipp: Versuche einen anderen Ticker (z.B. MSFT) oder warte 30 Sekunden und lade neu.")
             st.stop()
 
     # ==================== SCORE ====================
