@@ -75,6 +75,32 @@ if ticker:
             st.error(f"Fehler: {e}")
             st.stop()
 
-    # ==================== SCORE ====================
+    # ==================== SCORE (korrigiert) ====================
     score = 0
-    score += 18 if rule_of_40 >
+    if rule_of_40 > 40:
+        score += 18
+    else:
+        score += 6
+
+    if fcf_yield > 3:
+        score += 12
+    else:
+        score += 4
+
+    if gross_margin > 55:
+        score += 10
+    else:
+        score += 5
+
+    if rule_of_40 > 50:
+        score += 5
+
+    if pe_to_use > 65:
+        score -= 16
+    elif pe_to_use > 45:
+        score -= 9
+
+    if debt_to_equity > 2.0:
+        score -= 8
+    if beta > 1.6:
+        score -= 7
