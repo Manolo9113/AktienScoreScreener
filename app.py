@@ -294,4 +294,4 @@ with tab5:
           "Rule of 40 nicht erfuellt (" + f"{rule_of_40:.1f}" + "%)")
 
 st.caption("Daten von Yahoo Finance - Keine Anlageberatung")
-```
+```p
