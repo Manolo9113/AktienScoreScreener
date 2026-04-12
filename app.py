@@ -5,290 +5,298 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import time
+from functools import lru_cache
 import logging
 
-# ===== DEBUG MODE =====
-DEBUG = True
+# ===== STREAMLIT CONFIG =====
+st.set_page_config(
+    page_title="Vigilanz-Cockpit",
+    page_icon="🛡️",
+    layout="wide",
+    initial_sidebar_state="collapsed"  # Hamburger-Menü auf Mobile!
+)
 
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-
-st.set_page_config(page_title="Vigilanz-Cockpit 🛡️", page_icon="🛡️", layout="wide")
-
+# ===== RESPONSIVE CUSTOM CSS =====
 st.markdown("""
 <style>
-.main { background: linear-gradient(135deg, #0f1419 0%, #1a1f2e 100%); }
-.header-title {
-    background: linear-gradient(90deg, #00ff9d 0%, #00d4ff 100%);
+/* Dark Theme */
+:root {
+    --bg-dark: #0a0e27;
+    --bg-card: #141b2f;
+    --text-primary: #e8eef7;
+    --text-secondary: #a8b2c1;
+    --accent-green: #22c55e;
+    --accent-red: #ef4444;
+    --accent-yellow: #eab308;
+    --accent-blue: #3b82f6;
+}
+
+.main {
+    background: linear-gradient(135deg, #0a0e27 0%, #141b2f 100%);
+    color: var(--text-primary);
+    max-width: 100%;
+    padding: 0;
+}
+
+/* Mobile-First: Kleine Screens zuerst */
+@media (max-width: 640px) {
+    .main {
+        padding: 0.5rem !important;
+    }
+    
+    h1, h2, h3 {
+        font-size: 1.3rem !important;
+        margin: 0.5rem 0 !important;
+    }
+    
+    .metric-box {
+        padding: 0.8rem !important;
+        margin: 0.3rem 0 !important;
+        border-radius: 8px !important;
+    }
+    
+    .stMetric {
+        background: transparent !important;
+    }
+    
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0.2rem;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        padding: 0.5rem 0.8rem !important;
+        font-size: 0.85rem !important;
+    }
+}
+
+/* Tablets & Desktop */
+@media (min-width: 641px) {
+    .main {
+        padding: 2rem 1rem;
+    }
+}
+
+/* Allgemeine Styles */
+.metric-box {
+    background: rgba(255, 255, 255, 0.05);
+    border-left: 4px solid var(--accent-blue);
+    padding: 1rem;
+    border-radius: 12px;
+    margin: 0.5rem 0;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+}
+
+.metric-box:hover {
+    background: rgba(255, 255, 255, 0.08);
+    transform: translateX(4px);
+}
+
+.metric-box.green {
+    border-left-color: var(--accent-green);
+}
+
+.metric-box.yellow {
+    border-left-color: var(--accent-yellow);
+}
+
+.metric-box.red {
+    border-left-color: var(--accent-red);
+}
+
+.score-box {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(52, 211, 153, 0.1) 100%);
+    border: 2px solid var(--accent-green);
+    padding: 1.5rem;
+    border-radius: 16px;
+    text-align: center;
+    margin: 1rem 0;
+}
+
+.score-box-warning {
+    background: linear-gradient(135deg, rgba(249, 115, 22, 0.15) 0%, rgba(251, 146, 60, 0.1) 100%);
+    border: 2px solid var(--accent-yellow);
+}
+
+.score-box-danger {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(252, 165, 165, 0.1) 100%);
+    border: 2px solid var(--accent-red);
+}
+
+.score-number {
+    font-size: 3rem;
+    font-weight: 800;
+    background: linear-gradient(90deg, #22c55e 0%, #3b82f6 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-    font-size: 2.5em;
-    font-weight: 800;
+    margin: 0;
 }
+
+.score-label {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0.5rem 0 0 0;
+}
+
+.header-title {
+    background: linear-gradient(90deg, #22c55e 0%, #3b82f6 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-size: 2.5rem;
+    font-weight: 800;
+    margin-bottom: 1rem;
+}
+
+/* Tabs responsive */
+.stTabs {
+    gap: 0.5rem;
+}
+
+.stTabs [data-baseweb="tab"] {
+    border-radius: 8px 8px 0 0;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.8rem 1rem;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+    background: var(--accent-blue);
+    color: white;
+}
+
+/* Charts responsive */
+.plotly-chart {
+    width: 100% !important;
+}
+
+/* Info/Warning/Error Boxen */
+.stAlert {
+    border-radius: 12px;
+    padding: 1rem;
+    margin: 0.5rem 0;
+}
+
+/* Buttons großer auf Mobile */
+.stButton > button {
+    width: 100%;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* Divider */
+hr {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    margin: 1.5rem 0;
+}
+
+/* Tooltip Styling */
+.tooltip-text {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    margin-top: 0.25rem;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🛡️ Vigilanz-Cockpit")
+# ===== LOGGING SETUP =====
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# --- BRANCHEN-SPEZIFISCHE BENCHMARKS ---
+# ===== SEKTOR-BENCHMARKS (Rule of 40 fokussiert) =====
 SECTOR_BENCHMARKS = {
     "Technology": {
-        "pe_range": (20, 35, 50, 80),
-        "margin_min": 15,
-        "growth_min": 8,
-        "debt_max": 1.0,
-        "roe_min": 12,
-        "fcf_yield_min": 2,
-        "emojis": "💻"
+        "pe_forward": (18, 25, 35),
+        "rule_of_40": 35,
+        "gross_margin": 70,
+        "fcf_yield": 1.5,
+        "roe": 12,
+        "emoji": "💻"
     },
     "Software": {
-        "pe_range": (25, 40, 60, 100),
-        "margin_min": 20,
-        "growth_min": 10,
-        "debt_max": 0.8,
-        "roe_min": 15,
-        "fcf_yield_min": 3,
-        "emojis": "⚙️"
+        "pe_forward": (20, 28, 40),
+        "rule_of_40": 40,
+        "gross_margin": 75,
+        "fcf_yield": 2,
+        "roe": 15,
+        "emoji": "⚙️"
     },
     "Internet": {
-        "pe_range": (20, 35, 50, 80),
-        "margin_min": 10,
-        "growth_min": 15,
-        "debt_max": 1.2,
-        "roe_min": 10,
-        "fcf_yield_min": 1,
-        "emojis": "🌐"
+        "pe_forward": (18, 28, 45),
+        "rule_of_40": 40,
+        "gross_margin": 65,
+        "fcf_yield": 1,
+        "roe": 10,
+        "emoji": "🌐"
     },
-    "Financial Services": {
-        "pe_range": (10, 15, 20, 30),
-        "margin_min": 15,
-        "growth_min": 3,
-        "debt_max": 8.0,
-        "roe_min": 10,
-        "fcf_yield_min": 2,
-        "emojis": "🏦"
+    "Semiconductors": {
+        "pe_forward": (15, 22, 32),
+        "rule_of_40": 30,
+        "gross_margin": 50,
+        "fcf_yield": 2,
+        "roe": 20,
+        "emoji": "🔌"
     },
     "Healthcare": {
-        "pe_range": (18, 28, 40, 60),
-        "margin_min": 12,
-        "growth_min": 5,
-        "debt_max": 1.5,
-        "roe_min": 12,
-        "fcf_yield_min": 2,
-        "emojis": "⚕️"
-    },
-    "Pharmaceuticals": {
-        "pe_range": (15, 25, 35, 50),
-        "margin_min": 20,
-        "growth_min": 3,
-        "debt_max": 1.0,
-        "roe_min": 15,
-        "fcf_yield_min": 2,
-        "emojis": "💊"
-    },
-    "Consumer Cyclical": {
-        "pe_range": (12, 18, 25, 40),
-        "margin_min": 5,
-        "growth_min": 3,
-        "debt_max": 2.0,
-        "roe_min": 8,
-        "fcf_yield_min": 3,
-        "emojis": "🛍️"
-    },
-    "Consumer Defensive": {
-        "pe_range": (18, 25, 35, 50),
-        "margin_min": 8,
-        "growth_min": 2,
-        "debt_max": 2.0,
-        "roe_min": 10,
-        "fcf_yield_min": 3,
-        "emojis": "🥬"
+        "pe_forward": (15, 22, 30),
+        "rule_of_40": 25,
+        "gross_margin": 60,
+        "fcf_yield": 2,
+        "roe": 12,
+        "emoji": "⚕️"
     },
     "Industrials": {
-        "pe_range": (12, 18, 25, 35),
-        "margin_min": 6,
-        "growth_min": 3,
-        "debt_max": 2.5,
-        "roe_min": 10,
-        "fcf_yield_min": 2,
-        "emojis": "🏭"
+        "pe_forward": (12, 16, 22),
+        "rule_of_40": 15,
+        "gross_margin": 35,
+        "fcf_yield": 3,
+        "roe": 12,
+        "emoji": "🏭"
+    },
+    "Consumer": {
+        "pe_forward": (15, 20, 28),
+        "rule_of_40": 18,
+        "gross_margin": 40,
+        "fcf_yield": 3,
+        "roe": 10,
+        "emoji": "🛍️"
     },
     "Energy": {
-        "pe_range": (10, 15, 20, 30),
-        "margin_min": 10,
-        "growth_min": 2,
-        "debt_max": 3.0,
-        "roe_min": 8,
-        "fcf_yield_min": 4,
-        "emojis": "⚡"
+        "pe_forward": (10, 14, 20),
+        "rule_of_40": 8,
+        "gross_margin": 40,
+        "fcf_yield": 5,
+        "roe": 12,
+        "emoji": "⚡"
     },
-    "Utilities": {
-        "pe_range": (15, 20, 28, 40),
-        "margin_min": 8,
-        "growth_min": 1,
-        "debt_max": 3.0,
-        "roe_min": 8,
-        "fcf_yield_min": 3,
-        "emojis": "💡"
-    },
-    "Real Estate": {
-        "pe_range": (12, 18, 25, 35),
-        "margin_min": 5,
-        "growth_min": 2,
-        "debt_max": 4.0,
-        "roe_min": 6,
-        "fcf_yield_min": 3,
-        "emojis": "🏠"
-    },
-    "Communication Services": {
-        "pe_range": (15, 22, 30, 45),
-        "margin_min": 15,
-        "growth_min": 3,
-        "debt_max": 2.0,
-        "roe_min": 10,
-        "fcf_yield_min": 2,
-        "emojis": "📱"
-    },
-    "Materials": {
-        "pe_range": (10, 15, 20, 30),
-        "margin_min": 5,
-        "growth_min": 2,
-        "debt_max": 2.5,
-        "roe_min": 8,
-        "fcf_yield_min": 2,
-        "emojis": "⛏️"
-    }
 }
 
-# --- BEWERTUNGS-FUNKTIONEN ---
-def get_sector_benchmark(sector):
-    """Hole Benchmark für Sektor"""
-    if sector in SECTOR_BENCHMARKS:
-        return SECTOR_BENCHMARKS[sector]
-    return SECTOR_BENCHMARKS["Technology"]
+# ===== UTILITY FUNCTIONS =====
 
-def get_color_for_metric_with_sector(value, metric_type, sector):
-    """Intelligente Farbgebung basierend auf Sektor"""
-    if value is None or (isinstance(value, (int, float)) and (value <= 0 or np.isnan(value) or np.isinf(value))):
-        return "gray", "N/A"
-    
-    benchmark = get_sector_benchmark(sector)
-    
-    if metric_type == "pe":
-        green, yellow, orange, red = benchmark["pe_range"]
-        if value < green:
-            return "green", f"Exzellent (unter {green})"
-        elif value < yellow:
-            return "green", f"Gut ({green}-{yellow})"
-        elif value < orange:
-            return "yellow", f"Mittel ({yellow}-{orange})"
-        elif value < red:
-            return "orange", f"Teuer ({orange}-{red})"
-        else:
-            return "red", f"Überbewertet (über {red})"
-    
-    elif metric_type == "fcf_yield":
-        min_yield = benchmark["fcf_yield_min"]
-        if value < min_yield * 0.3:
-            return "red", f"Sehr niedrig"
-        elif value < min_yield * 0.7:
-            return "orange", f"Niedrig (unter {min_yield}%)"
-        elif value < min_yield:
-            return "yellow", f"Mittel ({min_yield}%)"
-        else:
-            return "green", f"Gut (über {min_yield}%)"
-    
-    elif metric_type == "div_yield":
-        if value < 1:
-            return "yellow", f"Niedrig"
-        elif value < 3:
-            return "green", f"Attraktiv"
-        elif value < 5:
-            return "yellow", f"Erhöht"
-        else:
-            return "orange", f"Sehr hoch"
-    
-    elif metric_type == "margin":
-        min_margin = benchmark["margin_min"]
-        if value < min_margin * 0.5:
-            return "red", f"Sehr niedrig"
-        elif value < min_margin:
-            return "orange", f"Niedrig"
-        elif value < min_margin * 1.5:
-            return "yellow", f"Normal"
-        else:
-            return "green", f"Überdurchschnittlich"
-    
-    elif metric_type == "growth":
-        min_growth = benchmark["growth_min"]
-        if value < 0:
-            return "red", "Negativ"
-        elif value < min_growth * 0.5:
-            return "orange", f"Unter Schnitt"
-        elif value < min_growth:
-            return "yellow", f"Unter Erwartung"
-        elif value < min_growth * 2:
-            return "green", f"Gut"
-        else:
-            return "green", f"Außergewöhnlich"
-    
-    elif metric_type == "debt":
-        max_debt = benchmark["debt_max"]
-        if value < max_debt * 0.5:
-            return "green", f"Sehr niedrig"
-        elif value < max_debt:
-            return "green", f"Gesund"
-        elif value < max_debt * 1.5:
-            return "yellow", f"Erhöht"
-        else:
-            return "red", f"Hoch"
-    
-    elif metric_type == "roe":
-        min_roe = benchmark["roe_min"]
-        if value < min_roe * 0.5:
-            return "red", f"Schwach"
-        elif value < min_roe:
-            return "orange", f"Unter Branche"
-        elif value < min_roe * 1.5:
-            return "green", f"Gut"
-        else:
-            return "green", f"Hervorragend"
-    
-    return "gray", "N/A"
-
-def color_box(value, color, description=""):
-    """Erstelle einen farbigen Box für Metriken"""
-    colors = {
-        "green": "#22c55e",
-        "yellow": "#eab308",
-        "orange": "#f97316",
-        "red": "#ef4444",
-        "gray": "#6b7280"
-    }
-    
-    bg_colors = {
-        "green": "rgba(34, 197, 94, 0.15)",
-        "yellow": "rgba(234, 179, 8, 0.15)",
-        "orange": "rgba(249, 115, 22, 0.15)",
-        "red": "rgba(239, 68, 68, 0.15)",
-        "gray": "rgba(107, 114, 128, 0.1)"
-    }
-    
-    emojis = {
-        "green": "🟢",
-        "yellow": "🟡",
-        "orange": "🟠",
-        "red": "🔴",
-        "gray": "⚪"
-    }
-    
-    desc_text = f"<br><small style='color: #999; font-size: 0.85em;'>{description}</small>" if description else ""
-    
-    return f'<div style="background: {bg_colors[color]}; border-left: 4px solid {colors[color]}; padding: 12px; border-radius: 6px; margin: 8px 0;"><span style="color: {colors[color]}; font-weight: bold;">{emojis[color]} {value}</span>{desc_text}</div>'
+@lru_cache(maxsize=128)
+def get_sector_from_ticker(ticker):
+    """Cache-basierte Sektor-Abfrage"""
+    try:
+        stock = yf.Ticker(ticker)
+        sector = stock.info.get('sector', 'Technology')
+        return sector if sector in SECTOR_BENCHMARKS else 'Technology'
+    except:
+        return 'Technology'
 
 def safe_get_float(dictionary, key, default=0):
-    """Sichere Abfrage von Floats"""
+    """Sichere Float-Abfrage ohne Crashes"""
     try:
         value = dictionary.get(key, default)
         if value is None:
@@ -300,802 +308,585 @@ def safe_get_float(dictionary, key, default=0):
     except:
         return default
 
-# --- DATENLADUNG MIT DEBUG ---
+def get_sector_benchmark(sector):
+    """Benchmark für Sektor laden"""
+    return SECTOR_BENCHMARKS.get(sector, SECTOR_BENCHMARKS['Technology'])
+
+def calculate_rule_of_40(growth_rate, fcf_yield):
+    """Rule of 40: Growth % + FCF Yield % sollte >= 40 sein"""
+    if growth_rate is None or fcf_yield is None:
+        return None
+    return growth_rate + fcf_yield
+
+def calculate_quality_score(info, sector):
+    """
+    Verbesserte Score-Logik (0-45):
+    - Mildere KGV-Bestrafung
+    - Rule of 40 wichtiger
+    - Bruttomarge stark gewichtet
+    - FCF-Yield bei Wachstum milder
+    """
+    score = 0
+    max_score = 45
+    
+    # 1. Forward PE (10 Punkte) - milder
+    pe_fwd = safe_get_float(info, 'forwardPE')
+    benchmark = get_sector_benchmark(sector)
+    pe_range = benchmark['pe_forward']
+    
+    if pe_fwd > 0:
+        if pe_fwd < pe_range[0]:
+            score += 10  # Sehr günstig
+        elif pe_fwd < pe_range[1]:
+            score += 8   # Günstig
+        elif pe_fwd < pe_range[2]:
+            score += 5   # Fair
+        else:
+            score += 2   # Teuer
+    
+    # 2. Rule of 40 (12 Punkte) - wichtigste Metrik!
+    revenue_growth = safe_get_float(info, 'revenueGrowth') * 100
+    fcf_yield = (safe_get_float(info, 'freeCashflow') / safe_get_float(info, 'marketCap', 1)) * 100 if safe_get_float(info, 'marketCap', 1) > 0 else 0
+    rule_40 = calculate_rule_of_40(revenue_growth, fcf_yield)
+    
+    if rule_40 is not None:
+        rule_40_benchmark = benchmark['rule_of_40']
+        if rule_40 >= rule_40_benchmark:
+            score += 12
+        elif rule_40 >= rule_40_benchmark * 0.8:
+            score += 9
+        elif rule_40 >= rule_40_benchmark * 0.6:
+            score += 6
+        else:
+            score += 2
+    
+    # 3. Bruttomarge (10 Punkte) - stark gewichtet
+    gross_margin = safe_get_float(info, 'grossMargins') * 100
+    margin_benchmark = benchmark['gross_margin']
+    
+    if gross_margin > 0:
+        if gross_margin >= margin_benchmark:
+            score += 10
+        elif gross_margin >= margin_benchmark * 0.85:
+            score += 8
+        elif gross_margin >= margin_benchmark * 0.7:
+            score += 5
+        else:
+            score += 2
+    
+    # 4. ROE (8 Punkte)
+    roe = safe_get_float(info, 'returnOnEquity') * 100
+    roe_benchmark = benchmark['roe']
+    
+    if roe > 0:
+        if roe >= roe_benchmark * 1.5:
+            score += 8
+        elif roe >= roe_benchmark:
+            score += 6
+        elif roe >= roe_benchmark * 0.7:
+            score += 3
+        else:
+            score += 1
+    
+    # 5. Verschuldung (5 Punkte)
+    debt_to_equity = safe_get_float(info, 'debtToEquity')
+    
+    if debt_to_equity > 0:
+        if debt_to_equity < 1:
+            score += 5
+        elif debt_to_equity < 2:
+            score += 3
+        elif debt_to_equity < 3:
+            score += 1
+    
+    return min(score, max_score)
+
+def score_to_interpretation(score):
+    """Score 0-45 in Interpretation umwandeln"""
+    if score >= 38:
+        return "🟢 ELITE - Exzellentes Unternehmen", "green"
+    elif score >= 30:
+        return "🟢 GUT - Solides Qualitäts-Investment", "green"
+    elif score >= 20:
+        return "🟡 VORSICHT - Einige Warnsignale", "yellow"
+    else:
+        return "🔴 VERMEIDEN - Zu viele Schwächen", "red"
+
+def color_box(label, value, color, description=""):
+    """Formatierte Metrik-Box"""
+    colors = {
+        "green": "#22c55e",
+        "yellow": "#eab308",
+        "orange": "#f97316",
+        "red": "#ef4444",
+        "blue": "#3b82f6",
+        "gray": "#6b7280"
+    }
+    
+    bg_colors = {
+        "green": "rgba(34, 197, 94, 0.15)",
+        "yellow": "rgba(234, 179, 8, 0.15)",
+        "orange": "rgba(249, 115, 22, 0.15)",
+        "red": "rgba(239, 68, 68, 0.15)",
+        "blue": "rgba(59, 130, 246, 0.15)",
+        "gray": "rgba(107, 114, 128, 0.1)"
+    }
+    
+    emojis = {
+        "green": "🟢", "yellow": "🟡", "orange": "🟠", "red": "🔴", "blue": "🔵", "gray": "⚪"
+    }
+    
+    desc_html = f"<br><small style='color: #999; font-size: 0.8rem;'>{description}</small>" if description else ""
+    
+    return f"""
+    <div class="metric-box {color}" style="background: {bg_colors.get(color, bg_colors['blue'])}; 
+         border-left: 4px solid {colors.get(color, colors['blue'])};
+         padding: 0.8rem; border-radius: 8px; margin: 0.5rem 0;">
+        <span style="color: {colors.get(color, colors['blue'])}; font-weight: bold;">
+            {emojis.get(color, "•")} <strong>{label}:</strong> {value}
+        </span>{desc_html}
+    </div>
+    """
+
 @st.cache_data(ttl=3600)
-def get_stock_data_extended(ticker):
-    """Hole Daten mit Preis + FCF + Dividenden + Bewertung"""
+def load_stock_data(ticker):
+    """Optimierte Datenladung mit Caching"""
     ticker = ticker.strip().upper()
     
     try:
-        st.info(f"⏳ Lade {ticker}... (Preis, FCF, Dividenden, Bewertung)")
+        # Preis-Daten
+        with st.spinner(f"⏳ Lade {ticker}..."):
+            data = yf.download(
+                ticker,
+                start=datetime.now() - timedelta(days=5*365),
+                progress=False,
+                threads=False
+            )
         
-        # Preis-Daten (10 Jahre)
-        for attempt in range(3):
-            try:
-                data = yf.download(
-                    ticker, 
-                    start="2014-01-01",
-                    progress=False,
-                    threads=False
-                )
-                
-                if not data.empty:
-                    if DEBUG:
-                        st.success(f"✅ Preis-Daten geladen: {len(data)} Zeilen")
-                    break
-                    
-            except Exception as e:
-                if "429" in str(e) or "Too Many" in str(e):
-                    wait = 5 * (attempt + 1)
-                    st.warning(f"⏳ Ratelimit - warte {wait}s...")
-                    time.sleep(wait)
-                else:
-                    if DEBUG:
-                        st.error(f"❌ Fehler Versuch {attempt + 1}: {str(e)[:100]}")
-                    raise
+        if data.empty:
+            return None, None
         
-        if data is None or data.empty:
-            st.error("❌ Keine Preis-Daten!")
-            if DEBUG:
-                st.write("data ist:", data)
-            return None, None, None, None
-        
-        time.sleep(1)
+        # Info + Finanzdaten
         stock = yf.Ticker(ticker)
         info = stock.info
         
-        if DEBUG:
-            st.info(f"✅ Info geladen: {len(info)} Keys")
-            st.write(f"Sector: {info.get('sector', 'N/A')}")
-            st.write(f"Market Cap: ${info.get('marketCap', 'N/A')}")
-            st.write(f"Trailing PE: {info.get('trailingPE', 'N/A')}")
-        
-        # Cash Flow
-        cashflow = None
-        try:
-            cashflow = stock.cashflow
-            if cashflow is not None and not cashflow.empty:
-                if DEBUG:
-                    st.info(f"✅ Cashflow geladen: {cashflow.shape}")
-        except Exception as e:
-            if DEBUG:
-                st.warning(f"⚠️ Cashflow nicht verfügbar: {str(e)[:50]}")
-        
-        # Dividenden
-        dividends = None
-        try:
-            dividends = stock.dividends
-            if dividends is not None and not dividends.empty:
-                if DEBUG:
-                    st.info(f"✅ Dividenden geladen: {len(dividends)} Einträge")
-        except Exception as e:
-            if DEBUG:
-                st.warning(f"⚠️ Dividenden nicht verfügbar: {str(e)[:50]}")
-        
-        return data, info, cashflow, dividends
+        return data, info
         
     except Exception as e:
-        st.error(f"❌ Kritischer Fehler: {str(e)}")
-        if DEBUG:
-            st.write(f"Full error: {e}")
-        return None, None, None, None
+        st.error(f"❌ Fehler beim Laden: {str(e)[:80]}")
+        logger.error(f"Load error for {ticker}: {str(e)}")
+        return None, None
 
-# Sidebar
+# ===== APP HEADER =====
+col_main = st.columns([1])[0]
+
+with col_main:
+    st.markdown('<h1 class="header-title">🛡️ Vigilanz-Cockpit</h1>', unsafe_allow_html=True)
+    st.caption("Qualitäts-Investment Tool basierend auf Rule of 40 & Operative Exzellenz")
+
+# ===== SIDEBAR - MOBILE FRIENDLY =====
 with st.sidebar:
-    st.header("🔎 Ticker")
+    st.header("⚙️ Einstellungen")
     
-    popular = {
-        "MSFT – Microsoft (Software)": "MSFT",
-        "AAPL – Apple (Tech)": "AAPL",
-        "GOOGL – Alphabet (Internet)": "GOOGL",
-        "AMZN – Amazon (Internet)": "AMZN",
-        "JNJ – Johnson&Johnson (Healthcare)": "JNJ",
-        "PG – Procter&Gamble (Consumer)": "PG",
-        "XOM – ExxonMobil (Energy)": "XOM",
-        "NVDA – NVIDIA (Tech)": "NVDA",
-        "Eigener Ticker": ""
-    }
+    col_input1, col_input2 = st.columns([3, 1])
     
-    choice = st.selectbox("Wähle einen Ticker:", list(popular.keys()))
+    with col_input1:
+        ticker_input = st.text_input(
+            "🔎 Ticket eingeben:",
+            value="MSFT",
+            placeholder="z.B. MSFT, AAPL, GOOGL"
+        )
     
-    if choice == "Eigener Ticker":
-        ticker = st.text_input("Gib Ticker ein:", "MSFT").upper().strip()
-    else:
-        ticker = popular[choice]
+    with col_input2:
+        if st.button("🔍", help="Suchen"):
+            st.rerun()
+    
+    st.divider()
+    
+    st.markdown("### 📊 Schnellzugriff")
+    popular = ["MSFT", "AAPL", "GOOGL", "NVDA", "META", "TSLA", "AMZN"]
+    
+    # 2x4 Grid auf Mobile, 3x3 auf Desktop
+    cols = st.columns(3)
+    for idx, stock in enumerate(popular):
+        with cols[idx % 3]:
+            if st.button(stock, use_container_width=True):
+                st.session_state.ticker = stock
+                st.rerun()
+    
+    st.divider()
+    st.markdown("""
+    ### 📚 Über das Tool
+    
+    **Vigilanz-Cockpit** bewertet Qualitäts-Aktien nach:
+    - **Rule of 40:** Growth + FCF Yield
+    - **Bruttomarge:** Wettbewerbsvorteil
+    - **Forward PE:** Realistic Bewertung
+    - **ROE + Verschuldung:** Eigenkapital-Qualität
+    
+    📖 [Growth-Investing Philosophie](https://www.notion.so)
+    """)
 
-if not ticker:
-    st.error("Bitte einen Ticker eingeben")
+# ===== MAIN APP =====
+ticker = ticker_input.strip().upper() if ticker_input else "MSFT"
+
+if not ticker or len(ticker) > 5:
+    st.error("❌ Bitte einen gültigen Ticker eingeben (z.B. MSFT, AAPL)")
     st.stop()
 
-# --- DATEN LADEN ---
-data, info, cashflow, dividends = get_stock_data_extended(ticker)
+# Daten laden
+data, info = load_stock_data(ticker)
 
 if data is None or info is None:
-    st.error("Daten konnten nicht geladen werden")
+    st.error(f"❌ '{ticker}' nicht gefunden. Bitte versuchen Sie es erneut.")
     st.stop()
 
-# --- BASIS-METRIKEN ---
+# ===== BASELINE METRICS =====
 current_price = data['Close'].iloc[-1] if not data.empty else 0
 company_name = info.get('longName', ticker)
 sector = info.get('sector', 'Technology')
+market_cap = safe_get_float(info, 'marketCap')
 
-st.markdown(f"### {company_name} ({ticker})")
+# Quality Score berechnen
+quality_score = calculate_quality_score(info, sector)
+score_text, score_color = score_to_interpretation(quality_score)
 
-col_header1, col_header2, col_header3 = st.columns(3)
-with col_header1:
-    st.caption(f"🏭 Sektor: {sector}")
-with col_header2:
-    benchmark = get_sector_benchmark(sector)
-    st.caption(f"📊 Benchmark: {benchmark['emojis']}")
-with col_header3:
-    st.caption(f"📍 Branchengerecht bewertet!")
+# ===== HEADER SECTION =====
+st.markdown(f"""
+### 📈 {company_name} ({ticker})
+**Sektor:** {SECTOR_BENCHMARKS.get(sector, SECTOR_BENCHMARKS['Technology'])['emoji']} {sector}
+""")
 
-col1, col2, col3 = st.columns(3)
+# Schnellmetriken im 2x2 Grid (mobile responsive)
+metric_cols = st.columns(2)
 
-with col1:
-    st.metric("💰 Kurs", f"${round(current_price, 2)}")
-with col2:
-    market_cap = safe_get_float(info, 'marketCap')
-    st.metric("📊 Marktcap", f"${round(market_cap / 1e9, 1)}B" if market_cap > 0 else "N/A")
-with col3:
-    pe = safe_get_float(info, 'trailingPE')
-    st.metric("📈 KGV", f"{round(pe, 1)}" if pe > 0 else "N/A")
+with metric_cols[0]:
+    st.metric(
+        label="💰 Aktueller Kurs",
+        value=f"${round(current_price, 2)}",
+        delta=None
+    )
+
+with metric_cols[1]:
+    st.metric(
+        label="📊 Marktcap",
+        value=f"${round(market_cap / 1e9, 1)}B" if market_cap > 0 else "N/A",
+        delta=None
+    )
+
+# ===== QUALITY SCORE BOX =====
+score_class = "score-box"
+if score_color == "yellow":
+    score_class += " score-box-warning"
+elif score_color == "red":
+    score_class += " score-box-danger"
+
+st.markdown(f"""
+<div class="{score_class}">
+    <p class="score-number">{round(quality_score, 1)}/45</p>
+    <p class="score-label">{score_text}</p>
+</div>
+""", unsafe_allow_html=True)
 
 st.divider()
 
-# --- TABS ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-    "📊 Kennzahlen",
-    "📈 Chart",
-    "💰 FCF & Dividenden",
-    "💎 Bewertung Historisch",
-    "💼 Bilanzdaten",
-    "⚖️ Risikoanalyse",
-    "💵 Cashflow",
-    "📋 Details"
+# ===== TABS - MOBILE OPTIMIERT =====
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 Score-Details",
+    "📈 5J-Chart",
+    "💎 Kennzahlen",
+    "💰 Cashflow",
+    "⚖️ Risiko"
 ])
 
-# TAB 1: KENNZAHLEN
+# ===== TAB 1: SCORE DETAILS =====
 with tab1:
-    st.subheader("🎯 Kern-Kennzahlen (Branchenangepasst)")
+    st.subheader("🎯 Quality Score Analyse")
     
-    benchmark = get_sector_benchmark(sector)
+    col_s1, col_s2 = st.columns(2)
     
-    st.info(f"""
-    📌 **Branche:** {sector}
+    with col_s1:
+        st.markdown(color_box(
+            "Rule of 40",
+            f"{round(calculate_rule_of_40(safe_get_float(info, 'revenueGrowth') * 100, (safe_get_float(info, 'freeCashflow') / safe_get_float(info, 'marketCap', 1)) * 100), 1) if calculate_rule_of_40(safe_get_float(info, 'revenueGrowth') * 100, (safe_get_float(info, 'freeCashflow') / safe_get_float(info, 'marketCap', 1)) * 100) else 'N/A'}",
+            "blue",
+            "Growth + FCF Yield sollte ≥ 40 sein"
+        ), unsafe_allow_html=True)
     
-    **Benchmarks:**
-    - KGV: {benchmark['pe_range'][1]}-{benchmark['pe_range'][2]} (normal)
-    - FCF Yield: {benchmark['fcf_yield_min']}%+ | Bruttomarge: {benchmark['margin_min']}%+
-    """)
+    with col_s2:
+        benchmark = get_sector_benchmark(sector)
+        gm = safe_get_float(info, 'grossMargins') * 100
+        gm_color = "green" if gm >= benchmark['gross_margin'] else "yellow" if gm >= benchmark['gross_margin'] * 0.85 else "red"
+        st.markdown(color_box(
+            "Bruttomarge",
+            f"{round(gm, 1)}%" if gm > 0 else "N/A",
+            gm_color,
+            f"Benchmark: {benchmark['gross_margin']}%"
+        ), unsafe_allow_html=True)
     
-    m1, m2, m3, m4 = st.columns(4)
+    st.divider()
     
-    with m1:
-        pe = safe_get_float(info, 'trailingPE')
-        color, desc = get_color_for_metric_with_sector(pe, "pe", sector)
-        st.markdown(color_box(f"KGV: {round(pe, 1) if pe > 0 else 'N/A'}", color, desc), unsafe_allow_html=True)
+    col_s3, col_s4 = st.columns(2)
     
-    with m2:
+    with col_s3:
+        pe_fwd = safe_get_float(info, 'forwardPE')
+        pe_range = benchmark['pe_forward']
+        pe_color = "green" if pe_fwd < pe_range[0] else "green" if pe_fwd < pe_range[1] else "yellow" if pe_fwd < pe_range[2] else "red"
+        st.markdown(color_box(
+            "Forward P/E",
+            f"{round(pe_fwd, 1)}" if pe_fwd > 0 else "N/A",
+            pe_color,
+            f"Fair: {pe_range[0]}-{pe_range[1]}, Benchmark: {pe_range[2]}"
+        ), unsafe_allow_html=True)
+    
+    with col_s4:
+        roe = safe_get_float(info, 'returnOnEquity') * 100
+        roe_color = "green" if roe >= benchmark['roe'] * 1.5 else "green" if roe >= benchmark['roe'] else "yellow" if roe > 0 else "red"
+        st.markdown(color_box(
+            "ROE",
+            f"{round(roe, 1)}%" if roe > 0 else "N/A",
+            roe_color,
+            f"Benchmark: {benchmark['roe']}%"
+        ), unsafe_allow_html=True)
+    
+    st.divider()
+    
+    col_s5, col_s6 = st.columns(2)
+    
+    with col_s5:
+        rg = safe_get_float(info, 'revenueGrowth') * 100
+        rg_color = "green" if rg >= 15 else "green" if rg >= 10 else "yellow" if rg > 0 else "red"
+        st.markdown(color_box(
+            "Revenue Growth",
+            f"{round(rg, 1)}%" if rg > 0 else "N/A",
+            rg_color,
+            "Wachstum Jahr-über-Jahr"
+        ), unsafe_allow_html=True)
+    
+    with col_s6:
+        de = safe_get_float(info, 'debtToEquity')
+        de_color = "green" if de < 1 else "yellow" if de < 2 else "red"
+        st.markdown(color_box(
+            "Debt/Equity",
+            f"{round(de, 2)}" if de > 0 else "N/A",
+            de_color,
+            "Finanzielle Stabilität"
+        ), unsafe_allow_html=True)
+
+# ===== TAB 2: 5-JAHRES-CHART MIT BUY/EXPENSIVE ZONEN =====
+with tab2:
+    st.subheader("📈 5-Jahres-Growth Chart (Logarithmisch)")
+    
+    try:
+        # Letzten 5 Jahre
+        data_5y = data[data.index >= datetime.now() - timedelta(days=5*365)].copy()
+        
+        if not data_5y.empty and len(data_5y) > 50:
+            # EMA 200
+            ema_200 = data_5y['Close'].rolling(window=200).mean()
+            
+            fig = go.Figure()
+            
+            # Schlusskurs
+            fig.add_trace(go.Scatter(
+                x=data_5y.index,
+                y=data_5y['Close'],
+                name='Schlusskurs',
+                line=dict(color='#3b82f6', width=3),
+                hovertemplate='<b>Preis</b><br>%{x|%d.%m.%Y}<br>%{y:.2f} USD<extra></extra>'
+            ))
+            
+            # EMA 200 als Referenzlinie
+            fig.add_trace(go.Scatter(
+                x=ema_200.index,
+                y=ema_200,
+                name='EMA 200 (Trend)',
+                line=dict(color='#eab308', dash='dash', width=2),
+                hovertemplate='<b>EMA 200</b><br>%{x|%d.%m.%Y}<br>%{y:.2f} USD<extra></extra>'
+            ))
+            
+            # Green Zone: Unten EMA 200 (Buy Zone)
+            if not ema_200.empty:
+                last_ema = ema_200.iloc[-1]
+                min_price = ema_200.min() * 0.8
+                
+                fig.add_hspan(
+                    y0=min_price,
+                    y1=last_ema,
+                    fillcolor="rgba(34, 197, 94, 0.15)",
+                    line_width=0,
+                    name="🟢 Kaufzone"
+                )
+                
+                # Red Zone: Über EMA 200 (Expensive)
+                max_price = ema_200.max() * 1.3
+                fig.add_hspan(
+                    y0=last_ema,
+                    y1=max_price,
+                    fillcolor="rgba(239, 68, 68, 0.15)",
+                    line_width=0,
+                    name="🔴 Teuer"
+                )
+            
+            fig.update_yaxes(type="log", title_text="Preis (USD, log-Skala)")
+            fig.update_xaxes(title_text="Datum")
+            
+            fig.update_layout(
+                title=f"📈 {ticker} - 5 Jahre mit Buy/Expensive Zonen",
+                height=500,
+                template="plotly_dark",
+                plot_bgcolor='rgba(20, 27, 47, 0.8)',
+                paper_bgcolor='rgba(10, 14, 39, 1)',
+                font=dict(color='#a8b2c1', size=12),
+                margin=dict(l=50, r=50, t=80, b=50),
+                hovermode='x unified'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Status: Buy oder Expensive
+            if current_price < last_ema:
+                st.success(f"✅ KAUFZONE - Unter EMA 200: ${round(current_price, 2)} vs ${round(last_ema, 2)}")
+            else:
+                st.warning(f"⚠️ TEUER - Über EMA 200: ${round(current_price, 2)} vs ${round(last_ema, 2)}")
+        
+        else:
+            st.warning("⚠️ Nicht genug historische Daten")
+    
+    except Exception as e:
+        st.error(f"❌ Chart-Fehler: {str(e)[:60]}")
+
+# ===== TAB 3: KENNZAHLEN =====
+with tab3:
+    st.subheader("💎 Vollständige Kennzahlen")
+    
+    # Row 1
+    col_k1, col_k2 = st.columns(2)
+    
+    with col_k1:
+        pe_trail = safe_get_float(info, 'trailingPE')
+        st.metric("Trailing P/E", f"{round(pe_trail, 1)}" if pe_trail > 0 else "N/A")
+    with col_k2:
         fcf = safe_get_float(info, 'freeCashflow')
-        market_cap = safe_get_float(info, 'marketCap', 1)
-        fcf_yield = (fcf / market_cap * 100) if market_cap > 0 and fcf > 0 else 0
-        color, desc = get_color_for_metric_with_sector(fcf_yield, "fcf_yield", sector)
-        st.markdown(color_box(f"FCF Yield: {round(fcf_yield, 1) if fcf_yield > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
+        st.metric("Free Cashflow", f"${round(fcf / 1e9, 2)}B" if fcf > 0 else "N/A")
     
-    with m3:
-        debt_eq = safe_get_float(info, 'debtToEquity')
-        color, desc = get_color_for_metric_with_sector(debt_eq, "debt", sector)
-        st.markdown(color_box(f"Debt/Equity: {round(debt_eq, 2) if debt_eq > 0 else 'N/A'}", color, desc), unsafe_allow_html=True)
+    # Row 2
+    col_k3, col_k4 = st.columns(2)
     
-    with m4:
+    with col_k3:
         div_yield = safe_get_float(info, 'dividendYield') * 100 if info.get('dividendYield') else 0
-        color, desc = get_color_for_metric_with_sector(div_yield, "div_yield", sector)
-        st.markdown(color_box(f"Div Yield: {round(div_yield, 2) if div_yield > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
+        st.metric("Dividend Yield", f"{round(div_yield, 2)}%" if div_yield > 0 else "N/A")
     
-    st.divider()
-    st.subheader("📈 Rentabilitäts-Metriken")
-    
-    r1, r2, r3, r4 = st.columns(4)
-    
-    with r1:
-        gm = safe_get_float(info, 'grossMargins') * 100 if info.get('grossMargins') else 0
-        color, desc = get_color_for_metric_with_sector(gm, "margin", sector)
-        st.markdown(color_box(f"Gross Margin: {round(gm, 1) if gm > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
-    
-    with r2:
-        om = safe_get_float(info, 'operatingMargins') * 100 if info.get('operatingMargins') else 0
-        color, desc = get_color_for_metric_with_sector(om, "margin", sector)
-        st.markdown(color_box(f"Operating Margin: {round(om, 1) if om > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
-    
-    with r3:
-        pm = safe_get_float(info, 'profitMargins') * 100 if info.get('profitMargins') else 0
-        color, desc = get_color_for_metric_with_sector(pm, "margin", sector)
-        st.markdown(color_box(f"Profit Margin: {round(pm, 1) if pm > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
-    
-    with r4:
-        roe = safe_get_float(info, 'returnOnEquity') * 100 if info.get('returnOnEquity') else 0
-        color, desc = get_color_for_metric_with_sector(roe, "roe", sector)
-        st.markdown(color_box(f"ROE: {round(roe, 1) if roe > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
-    
-    st.divider()
-    st.subheader("📊 Wachstums-Metriken")
-    
-    g1, g2, g3, g4 = st.columns(4)
-    
-    with g1:
-        rg = safe_get_float(info, 'revenueGrowth') * 100 if info.get('revenueGrowth') else 0
-        color, desc = get_color_for_metric_with_sector(rg, "growth", sector)
-        st.markdown(color_box(f"Revenue Growth: {round(rg, 1) if rg != 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
-    
-    with g2:
-        eg = safe_get_float(info, 'earningsGrowth') * 100 if info.get('earningsGrowth') else 0
-        color, desc = get_color_for_metric_with_sector(eg, "growth", sector)
-        st.markdown(color_box(f"Earnings Growth: {round(eg, 1) if eg != 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
-    
-    with g3:
+    with col_k4:
         eps = safe_get_float(info, 'trailingEps')
         st.metric("EPS", f"${round(eps, 2)}" if eps > 0 else "N/A")
     
-    with g4:
-        peg = safe_get_float(info, 'pegRatio')
-        peg_color = "green" if 0.5 < peg < 1.5 else "yellow" if peg < 3 else "red"
-        st.markdown(color_box(f"PEG Ratio: {round(peg, 2) if peg > 0 else 'N/A'}", peg_color), unsafe_allow_html=True)
-
-# TAB 2: CHART MIT DEBUG
-with tab2:
-    st.subheader("📈 Preis-Chart (10 Jahre)")
+    # Row 3
+    col_k5, col_k6 = st.columns(2)
     
-    if DEBUG:
-        col_debug1, col_debug2, col_debug3 = st.columns(3)
-        with col_debug1:
-            st.write(f"📊 Data Shape: {data.shape if data is not None else 'None'}")
-        with col_debug2:
-            st.write(f"📊 Data Empty: {data.empty if data is not None else 'N/A'}")
-        with col_debug3:
-            st.write(f"📊 Data Dtypes:\n{data.dtypes if data is not None else 'None'}")
+    with col_k5:
+        beta = safe_get_float(info, 'beta')
+        st.metric("Beta", f"{round(beta, 2)}" if beta > 0 else "N/A")
     
-    try:
-        if data is None or data.empty:
-            st.error("❌ Keine Daten für Chart vorhanden")
-        elif len(data) < 10:
-            st.error(f"❌ Zu wenig Daten: {len(data)} Zeilen (brauche 10+)")
-        else:
-            # Clean data
-            data_clean = data[['Close']].copy().dropna()
-            
-            if DEBUG:
-                st.write(f"🧹 Clean data shape: {data_clean.shape}")
-                st.write(f"🧹 Last 5 rows:\n{data_clean.tail()}")
-            
-            if len(data_clean) > 10 and not data_clean['Close'].empty:
-                fig = go.Figure()
-                
-                # Hauptlinie
-                fig.add_trace(go.Scatter(
-                    x=data_clean.index,
-                    y=data_clean['Close'],
-                    name='Schlusskurs',
-                    line=dict(color='#00ff9d', width=2.5),
-                    hovertemplate='<b>Schlusskurs</b><br>%{x|%d.%m.%Y}<br>%{y:.2f} USD<extra></extra>'
-                ))
-                
-                # EMA 200
-                ema_200 = data_clean['Close'].rolling(window=200).mean()
-                if not ema_200.empty:
-                    fig.add_trace(go.Scatter(
-                        x=data_clean.index,
-                        y=ema_200,
-                        name='EMA 200',
-                        line=dict(color='#ff9500', dash='dot', width=1.5),
-                        opacity=0.8,
-                        hovertemplate='<b>EMA 200</b><br>%{x|%d.%m.%Y}<br>%{y:.2f} USD<extra></extra>'
-                    ))
-                
-                # EMA 50
-                ema_50 = data_clean['Close'].rolling(window=50).mean()
-                if not ema_50.empty:
-                    fig.add_trace(go.Scatter(
-                        x=data_clean.index,
-                        y=ema_50,
-                        name='EMA 50',
-                        line=dict(color='#00d4ff', dash='dash', width=1.5),
-                        opacity=0.8,
-                        hovertemplate='<b>EMA 50</b><br>%{x|%d.%m.%Y}<br>%{y:.2f} USD<extra></extra>'
-                    ))
-                
-                fig.update_layout(
-                    title=f"📈 {ticker} - 10 Jahre Preisverlauf",
-                    xaxis_title="Datum",
-                    yaxis_title="Preis (USD)",
-                    template="plotly_dark",
-                    height=500,
-                    hovermode='x unified',
-                    plot_bgcolor='#0f1419',
-                    paper_bgcolor='#0f1419',
-                    font=dict(color='#ccc'),
-                    margin=dict(l=50, r=50, t=80, b=50),
-                    xaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128, 128, 128, 0.2)'),
-                    yaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128, 128, 128, 0.2)')
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Info
-                last_ema200 = ema_200.iloc[-1] if not pd.isna(ema_200.iloc[-1]) else None
-                if last_ema200:
-                    if current_price < last_ema200:
-                        st.success(f"🟢 KAUFZONE - Preis (${round(current_price, 2)}) unter EMA 200 (${round(last_ema200, 2)})")
-                    else:
-                        st.warning(f"🔴 TEUER - Preis (${round(current_price, 2)}) über EMA 200 (${round(last_ema200, 2)})")
-            else:
-                st.error(f"❌ Zu wenig Clean-Daten: {len(data_clean)}")
-                if DEBUG:
-                    st.write(f"Close Series: {data_clean['Close'].describe()}")
-    
-    except Exception as e:
-        st.error(f"❌ Chart-Fehler: {str(e)}")
-        if DEBUG:
-            st.write(f"Full error: {e}")
-            import traceback
-            st.write(traceback.format_exc())
-
-# TAB 3: FCF & DIVIDENDEN
-with tab3:
-    st.subheader("💰 Free Cashflow & Dividenden Analyse")
-    
-    col_fcf1, col_fcf2, col_fcf3 = st.columns(3)
-    
-    with col_fcf1:
-        fcf = safe_get_float(info, 'freeCashflow')
-        st.metric("Aktueller FCF", f"${round(fcf / 1e9, 2)}B" if fcf > 0 else "N/A")
-    
-    with col_fcf2:
-        market_cap = safe_get_float(info, 'marketCap', 1)
-        fcf_yield = (fcf / market_cap * 100) if market_cap > 0 and fcf > 0 else 0
-        color, desc = get_color_for_metric_with_sector(fcf_yield, "fcf_yield", sector)
-        st.markdown(color_box(f"FCF Yield: {round(fcf_yield, 2) if fcf_yield > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
-    
-    with col_fcf3:
-        div_yield = safe_get_float(info, 'dividendYield') * 100 if info.get('dividendYield') else 0
-        color, desc = get_color_for_metric_with_sector(div_yield, "div_yield", sector)
-        st.markdown(color_box(f"Div Yield: {round(div_yield, 2) if div_yield > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
-    
-    st.divider()
-    
-    # FCF HISTORISCH
-    if cashflow is not None and not cashflow.empty:
-        st.subheader("📊 FCF Trend (10 Jahre)")
-        
-        try:
-            ocf_data = cashflow.loc['Operating Cash Flow'] if 'Operating Cash Flow' in cashflow.index else cashflow.iloc[0]
-            capex_data = cashflow.loc['Capital Expenditure'] if 'Capital Expenditure' in cashflow.index else pd.Series()
-            
-            fcf_hist = ocf_data - capex_data.abs()
-            fcf_hist = fcf_hist.sort_index(ascending=True)
-            fcf_hist_10y = fcf_hist.tail(10)
-            
-            if DEBUG:
-                st.write(f"FCF Historic data points: {len(fcf_hist_10y)}")
-            
-            if not fcf_hist_10y.empty and len(fcf_hist_10y) > 0:
-                fig_fcf = go.Figure()
-                
-                years = [d.year for d in fcf_hist_10y.index]
-                values = fcf_hist_10y.values / 1e9
-                
-                fig_fcf.add_trace(go.Bar(
-                    x=years,
-                    y=values,
-                    name='Free Cashflow',
-                    marker=dict(
-                        color=['#22c55e' if v > 0 else '#ef4444' for v in values]
-                    )
-                ))
-                
-                avg_fcf = fcf_hist_10y.mean()
-                fig_fcf.add_hline(
-                    y=avg_fcf / 1e9,
-                    line_dash="dash",
-                    line_color="#eab308",
-                    annotation_text=f"Ø: ${round(avg_fcf / 1e9, 2)}B",
-                    annotation_position="right"
-                )
-                
-                fig_fcf.update_layout(
-                    title=f"📊 {ticker} - Free Cashflow (10 Jahre)",
-                    xaxis_title="Jahr",
-                    yaxis_title="FCF (Milliarden USD)",
-                    template="plotly_dark",
-                    height=400,
-                    plot_bgcolor='#0f1419',
-                    paper_bgcolor='#0f1419'
-                )
-                
-                st.plotly_chart(fig_fcf, use_container_width=True)
-                
-                stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
-                with stat_col1:
-                    st.metric("Letztes Jahr", f"${round(fcf_hist_10y.iloc[-1] / 1e9, 2)}B")
-                with stat_col2:
-                    st.metric("Durchschnitt", f"${round(avg_fcf / 1e9, 2)}B")
-                with stat_col3:
-                    st.metric("Minimum", f"${round(fcf_hist_10y.min() / 1e9, 2)}B")
-                with stat_col4:
-                    st.metric("Maximum", f"${round(fcf_hist_10y.max() / 1e9, 2)}B")
-            else:
-                st.info("ℹ️ Nicht genug FCF-Historisch verfügbar")
-        except Exception as e:
-            st.warning(f"⚠️ FCF-Historisch nicht verfügbar: {str(e)[:50]}")
-    
-    st.divider()
-    
-    # DIVIDENDEN HISTORISCH
-    if dividends is not None and not dividends.empty:
-        st.subheader("💵 Dividenden Historisch (10 Jahre)")
-        
-        dividends_sorted = dividends.sort_index(ascending=True)
-        div_10y = dividends_sorted.tail(10)
-        
-        if DEBUG:
-            st.write(f"Dividenden data points: {len(div_10y)}")
-        
-        if not div_10y.empty:
-            fig_div = go.Figure()
-            
-            years_div = [d.year for d in div_10y.index]
-            
-            fig_div.add_trace(go.Bar(
-                x=years_div,
-                y=div_10y.values,
-                name='Dividende pro Aktie',
-                marker=dict(color='#22c55e')
-            ))
-            
-            avg_div = div_10y.mean()
-            fig_div.add_hline(
-                y=avg_div,
-                line_dash="dash",
-                line_color="#eab308",
-                annotation_text=f"Ø: ${round(avg_div, 2)}",
-                annotation_position="right"
-            )
-            
-            fig_div.update_layout(
-                title=f"💵 {ticker} - Dividenden (10 Jahre)",
-                xaxis_title="Jahr",
-                yaxis_title="Dividende pro Aktie (USD)",
-                template="plotly_dark",
-                height=400,
-                plot_bgcolor='#0f1419',
-                paper_bgcolor='#0f1419'
-            )
-            
-            st.plotly_chart(fig_div, use_container_width=True)
-            
-            div_stat_col1, div_stat_col2, div_stat_col3, div_stat_col4 = st.columns(4)
-            
-            with div_stat_col1:
-                st.metric("Letzte Div", f"${round(div_10y.iloc[-1], 2)}")
-            
-            with div_stat_col2:
-                st.metric("Ø 10 Jahre", f"${round(avg_div, 2)}")
-            
-            with div_stat_col3:
-                if len(div_10y) > 1 and div_10y.iloc[0] > 0:
-                    cagr_div = ((div_10y.iloc[-1] / div_10y.iloc[0]) ** (1 / (len(div_10y) - 1)) - 1) * 100
-                else:
-                    cagr_div = 0
-                st.metric("Div CAGR", f"{round(cagr_div, 1)}%")
-            
-            with div_stat_col4:
-                st.metric("Jahre gezahlt", f"{len(div_10y)}")
-    else:
-        st.info("ℹ️ Keine Dividenden verfügbar")
-
-# TAB 4: BEWERTUNG HISTORISCH
-with tab4:
-    st.subheader("💎 Bewertung Historisch - KGV & Preis")
-    
-    st.info(f"""
-    📊 **Historische Bewertungs-Analyse:**
-    
-    Diese Tab zeigt wie die Bewertung (KGV) der Aktie über 10 Jahre variiert hat.
-    Hilft zu sehen ob die aktuelle Bewertung günstig oder teuer ist.
-    """)
-    
-    try:
-        stock = yf.Ticker(ticker)
-        quarterly_financials = stock.quarterly_financials
-        
-        if DEBUG:
-            st.write(f"Quarterly Financials Shape: {quarterly_financials.shape if quarterly_financials is not None else 'None'}")
-        
-        if quarterly_financials is not None and not quarterly_financials.empty:
-            pe_history = []
-            
-            for i in range(min(32, len(quarterly_financials.columns))):
-                try:
-                    date = quarterly_financials.columns[i]
-                    year = date.year
-                    
-                    if i + 3 < len(quarterly_financials.columns):
-                        net_income_col = quarterly_financials.columns[i:i+4]
-                        if 'Net Income' in quarterly_financials.index:
-                            ttm = quarterly_financials.loc['Net Income', net_income_col].sum()
-                        else:
-                            ttm = quarterly_financials.iloc[0, i:i+4].sum()
-                        
-                        shares = safe_get_float(info, 'sharesOutstanding', 1)
-                        if shares > 0 and ttm > 0:
-                            eps = ttm / shares
-                            
-                            price_data = data[data.index.year == year]
-                            if not price_data.empty:
-                                price = price_data['Close'].iloc[0]
-                                pe = price / eps if eps > 0 else 0
-                                
-                                if pe > 0 and pe < 500:
-                                    pe_history.append({
-                                        'year': year,
-                                        'pe': pe,
-                                        'eps': eps,
-                                        'price': price
-                                    })
-                except:
-                    continue
-            
-            if pe_history:
-                pe_df = pd.DataFrame(pe_history).drop_duplicates(subset=['year']).sort_values('year')
-                
-                if DEBUG:
-                    st.write(f"PE History records: {len(pe_df)}")
-                    st.write(pe_df)
-                
-                fig_pe = go.Figure()
-                
-                fig_pe.add_trace(go.Scatter(
-                    x=pe_df['year'],
-                    y=pe_df['pe'],
-                    name='KGV',
-                    mode='lines+markers',
-                    line=dict(color='#00ff9d', width=2.5),
-                    marker=dict(size=8)
-                ))
-                
-                avg_pe = pe_df['pe'].mean()
-                fig_pe.add_hline(
-                    y=avg_pe,
-                    line_dash="dash",
-                    line_color="#eab308",
-                    annotation_text=f"Ø: {round(avg_pe, 1)}",
-                    annotation_position="right"
-                )
-                
-                benchmark_yellow = benchmark["pe_range"][1]
-                benchmark_red = benchmark["pe_range"][2]
-                
-                fig_pe.add_hspan(
-                    y0=0, y1=benchmark_yellow,
-                    fillcolor="green", opacity=0.1
-                )
-                fig_pe.add_hspan(
-                    y0=benchmark_yellow, y1=benchmark_red,
-                    fillcolor="yellow", opacity=0.1
-                )
-                fig_pe.add_hspan(
-                    y0=benchmark_red, y1=max(pe_df['pe'].max() * 1.1, 100),
-                    fillcolor="red", opacity=0.1
-                )
-                
-                fig_pe.update_layout(
-                    title=f"💎 {ticker} - KGV Historisch",
-                    xaxis_title="Jahr",
-                    yaxis_title="KGV",
-                    template="plotly_dark",
-                    height=450,
-                    plot_bgcolor='#0f1419',
-                    paper_bgcolor='#0f1419',
-                    hovermode='x unified'
-                )
-                
-                st.plotly_chart(fig_pe, use_container_width=True)
-                
-                st.markdown("### 📊 KGV Statistiken")
-                
-                pe_stat_col1, pe_stat_col2, pe_stat_col3, pe_stat_col4 = st.columns(4)
-                
-                with pe_stat_col1:
-                    current_pe = pe_df['pe'].iloc[-1]
-                    st.metric("Aktuelles KGV", f"{round(current_pe, 1)}")
-                
-                with pe_stat_col2:
-                    st.metric("Ø Historisch", f"{round(avg_pe, 1)}")
-                
-                with pe_stat_col3:
-                    min_pe = pe_df['pe'].min()
-                    st.metric("Minimum", f"{round(min_pe, 1)}")
-                
-                with pe_stat_col4:
-                    max_pe = pe_df['pe'].max()
-                    st.metric("Maximum", f"{round(max_pe, 1)}")
-                
-                st.divider()
-                
-                if current_pe < avg_pe * 0.8:
-                    st.success(f"🟢 GÜNSTIG - KGV {round(current_pe, 1)} unter Schnitt ({round(avg_pe, 1)})")
-                elif current_pe < avg_pe:
-                    st.info(f"🟡 FAIR - KGV {round(current_pe, 1)} Nähe Schnitt ({round(avg_pe, 1)})")
-                elif current_pe < avg_pe * 1.3:
-                    st.warning(f"🟠 TEUER - KGV {round(current_pe, 1)} über Schnitt ({round(avg_pe, 1)})")
-                else:
-                    st.error(f"🔴 SEHR TEUER - KGV {round(current_pe, 1)} deutlich über Schnitt ({round(avg_pe, 1)})")
-                
-                st.divider()
-                st.markdown(f"""
-                ### 🏭 Branche: {sector}
-                
-                - **Günstig:** KGV < {benchmark_yellow}
-                - **Fair:** KGV {benchmark_yellow}-{benchmark_red}
-                - **Teuer:** KGV > {benchmark_red}
-                """)
-            else:
-                st.info("ℹ️ Nicht genug Daten für KGV-Historie")
-        else:
-            st.info("ℹ️ Finanzdaten nicht verfügbar")
-    
-    except Exception as e:
-        st.warning(f"⚠️ KGV-Historie nicht berechenbar: {str(e)[:50]}")
-        if DEBUG:
-            st.write(f"Full error: {e}")
-
-# TAB 5: BILANZDATEN
-with tab5:
-    st.subheader("💼 Bilanz & Finanzielle Leistung")
-    
-    b1, b2, b3, b4 = st.columns(4)
-    
-    with b1:
+    with col_k6:
         assets = safe_get_float(info, 'totalAssets')
         st.metric("Gesamtvermögen", f"${round(assets / 1e9, 1)}B" if assets > 0 else "N/A")
-    
-    with b2:
-        debt = safe_get_float(info, 'totalDebt')
-        st.metric("Gesamtschulden", f"${round(debt / 1e9, 1)}B" if debt > 0 else "N/A")
-    
-    with b3:
-        equity = safe_get_float(info, 'totalEquity')
-        st.metric("Eigenkapital", f"${round(equity / 1e9, 1)}B" if equity > 0 else "N/A")
-    
-    with b4:
-        quick_ratio = safe_get_float(info, 'quickRatio')
-        qr_color = "green" if quick_ratio > 1 else "yellow" if quick_ratio > 0.5 else "red"
-        st.markdown(color_box(f"Quick Ratio: {round(quick_ratio, 2) if quick_ratio > 0 else 'N/A'}", qr_color), unsafe_allow_html=True)
 
-# TAB 6: RISIKOANALYSE
-with tab6:
-    st.subheader("⚖️ Risiko-Bewertung")
+# ===== TAB 4: CASHFLOW =====
+with tab4:
+    st.subheader("💰 Cashflow Analyse")
     
-    col_a, col_b = st.columns(2)
+    col_cf1, col_cf2, col_cf3 = st.columns(3)
     
-    with col_a:
-        st.markdown("### 💪 Stärke-Faktoren")
-        
-        gm = safe_get_float(info, 'grossMargins') * 100 if info.get('grossMargins') else 0
-        color, desc = get_color_for_metric_with_sector(gm, "margin", sector)
-        st.markdown(color_box(f"Burggraben: {round(gm, 1) if gm > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
-        
-        rg = safe_get_float(info, 'revenueGrowth') * 100 if info.get('revenueGrowth') else 0
-        color, desc = get_color_for_metric_with_sector(rg, "growth", sector)
-        st.markdown(color_box(f"Wachstum: {round(rg, 1) if rg != 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
-    
-    with col_b:
-        st.markdown("### ⛔ Risiko-Faktoren")
-        
-        de = safe_get_float(info, 'debtToEquity')
-        color, desc = get_color_for_metric_with_sector(de, "debt", sector)
-        st.markdown(color_box(f"Schulden: {round(de, 2) if de > 0 else 'N/A'}x", color, desc), unsafe_allow_html=True)
-        
-        pe = safe_get_float(info, 'trailingPE')
-        color, desc = get_color_for_metric_with_sector(pe, "pe", sector)
-        st.markdown(color_box(f"Bewertung: {round(pe, 1) if pe > 0 else 'N/A'}", color, desc), unsafe_allow_html=True)
-
-# TAB 7: CASHFLOW
-with tab7:
-    st.subheader("💵 Cashflow-Analyse")
-    
-    c1, c2, c3, c4 = st.columns(4)
-    
-    with c1:
+    with col_cf1:
         ocf = safe_get_float(info, 'operatingCashflow')
-        st.metric("Operating CF", f"${round(ocf / 1e9, 1)}B" if ocf > 0 else "N/A")
+        st.metric("Operating CF", f"${round(ocf / 1e9, 2)}B" if ocf > 0 else "N/A")
     
-    with c2:
+    with col_cf2:
         fcf = safe_get_float(info, 'freeCashflow')
-        st.metric("Free Cashflow", f"${round(fcf / 1e9, 1)}B" if fcf > 0 else "N/A")
+        st.metric("Free Cashflow", f"${round(fcf / 1e9, 2)}B" if fcf > 0 else "N/A")
     
-    with c3:
+    with col_cf3:
         capex = safe_get_float(info, 'capitalExpenditures')
-        st.metric("CapEx", f"${round(capex / 1e9, 1)}B" if capex > 0 else "N/A")
+        st.metric("CapEx", f"${round(capex / 1e9, 2)}B" if capex > 0 else "N/A")
     
-    with c4:
-        market_cap = safe_get_float(info, 'marketCap', 1)
-        fcf_yield = (fcf / market_cap * 100) if market_cap > 0 and fcf > 0 else 0
-        fcf_color = "green" if fcf_yield > 4 else "yellow" if fcf_yield > 2 else "orange"
-        st.markdown(color_box(f"FCF Yield: {round(fcf_yield, 1) if fcf_yield > 0 else 'N/A'}%", fcf_color), unsafe_allow_html=True)
-
-# TAB 8: DETAILS
-with tab8:
-    st.subheader("📋 Alle Metriken - Tabelle")
-    
-    metrics_dict = {
-        "Metrik": [
-            "Kurs",
-            "Marktcap",
-            "Trailing P/E",
-            "Forward P/E",
-            "Book Value",
-            "FCF Yield",
-            "Dividend Yield",
-            "Beta",
-            "52W High",
-            "52W Low",
-            "Debt/Equity",
-            "Current Ratio",
-            "Quick Ratio",
-            "ROE",
-            "ROA",
-            "ROIC",
-            "Gross Margin",
-            "Op. Margin",
-            "Profit Margin",
-            "Revenue Growth",
-            "EPS",
-            "Div/Share"
-        ],
-        "Wert": [
-            f"${round(current_price, 2)}",
-            f"${round(safe_get_float(info, 'marketCap') / 1e9, 1)}B",
-            f"{round(safe_get_float(info, 'trailingPE'), 2)}",
-            f"{round(safe_get_float(info, 'forwardPE'), 2)}",
-            f"${round(safe_get_float(info, 'bookValue'), 2)}",
-            f"{round((safe_get_float(info, 'freeCashflow') / safe_get_float(info, 'marketCap', 1)) * 100, 2)}%",
-            f"{round(safe_get_float(info, 'dividendYield') * 100 if info.get('dividendYield') else 0, 2)}%",
-            f"{round(safe_get_float(info, 'beta'), 2)}",
-            f"${round(safe_get_float(info, 'fiftyTwoWeekHigh'), 2)}",
-            f"${round(safe_get_float(info, 'fiftyTwoWeekLow'), 2)}",
-            f"{round(safe_get_float(info, 'debtToEquity'), 2)}",
-            f"{round(safe_get_float(info, 'currentRatio'), 2)}",
-            f"{round(safe_get_float(info, 'quickRatio'), 2)}",
-            f"{round(safe_get_float(info, 'returnOnEquity') * 100 if info.get('returnOnEquity') else 0, 2)}%",
-            f"{round(safe_get_float(info, 'returnOnAssets') * 100 if info.get('returnOnAssets') else 0, 2)}%",
-            f"{round(safe_get_float(info, 'returnOnCapital') * 100 if info.get('returnOnCapital') else 0, 2)}%",
-            f"{round(safe_get_float(info, 'grossMargins') * 100 if info.get('grossMargins') else 0, 2)}%",
-            f"{round(safe_get_float(info, 'operatingMargins') * 100 if info.get('operatingMargins') else 0, 2)}%",
-            f"{round(safe_get_float(info, 'profitMargins') * 100 if info.get('profitMargins') else 0, 2)}%",
-            f"{round(safe_get_float(info, 'revenueGrowth') * 100 if info.get('revenueGrowth') else 0, 2)}%",
-            f"${round(safe_get_float(info, 'trailingEps'), 2)}",
-            f"${round(safe_get_float(info, 'dividendRate'), 2)}" if info.get('dividendRate') else "N/A"
-        ]
-    }
-    
-    df = pd.DataFrame(metrics_dict)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-# Footer
-st.divider()
-st.markdown(f"""
-📊 **Datenquelle:** Yahoo Finance  
-🏭 **Sektor:** {sector}  
-📅 **Stand:** {datetime.now().strftime('%d.%m.%Y %H:%M')}  
-⚠️ **Disclaimer:** Keine Anlageberatung
-""")
-
-if DEBUG:
     st.divider()
-    st.markdown("### 🔧 DEBUG INFO")
-    with st.expander("Debug Informationen"):
-        st.write("**Keys in info dict:**")
-        st.write(list(info.keys())[:20])
-        st.write("\n**Data Summary:**")
-        st.write(data.describe() if data is not None else "None")
+    
+    # FCF Yield
+    market_cap = safe_get_float(info, 'marketCap', 1)
+    fcf_yield = (fcf / market_cap * 100) if market_cap > 0 and fcf > 0 else 0
+    
+    fcf_color = "green" if fcf_yield > 5 else "blue" if fcf_yield > 2.5 else "yellow" if fcf_yield > 1 else "red"
+    
+    st.markdown(color_box(
+        "FCF Yield",
+        f"{round(fcf_yield, 2)}%" if fcf_yield > 0 else "N/A",
+        fcf_color,
+        "Free Cashflow / Marktcap"
+    ), unsafe_allow_html=True)
+
+# ===== TAB 5: RISIKO =====
+with tab5:
+    st.subheader("⚖️ Risiko-Faktoren")
+    
+    col_r1, col_r2 = st.columns(2)
+    
+    with col_r1:
+        st.markdown("#### 💪 Stärken")
+        
+        # Gross Margin
+        gm = safe_get_float(info, 'grossMargins') * 100
+        st.markdown(color_box(
+            "Bruttomarge",
+            f"{round(gm, 1)}%" if gm > 0 else "N/A",
+            "green"
+        ), unsafe_allow_html=True)
+        
+        # Revenue Growth
+        rg = safe_get_float(info, 'revenueGrowth') * 100
+        st.markdown(color_box(
+            "Umsatzwachstum",
+            f"{round(rg, 1)}%" if rg > 0 else "N/A",
+            "green"
+        ), unsafe_allow_html=True)
+    
+    with col_r2:
+        st.markdown("#### ⛔ Schwächen")
+        
+        # Debt/Equity
+        de = safe_get_float(info, 'debtToEquity')
+        de_color = "green" if de < 1 else "yellow" if de < 2 else "red"
+        st.markdown(color_box(
+            "Verschuldung",
+            f"{round(de, 2)}" if de > 0 else "N/A",
+            de_color
+        ), unsafe_allow_html=True)
+        
+        # Forward PE
+        pe_fwd = safe_get_float(info, 'forwardPE')
+        pe_color = "green" if pe_fwd < 20 else "yellow" if pe_fwd < 30 else "red"
+        st.markdown(color_box(
+            "Forward P/E",
+            f"{round(pe_fwd, 1)}" if pe_fwd > 0 else "N/A",
+            pe_color
+        ), unsafe_allow_html=True)
+
+# ===== FOOTER =====
+st.divider()
+
+footer_col1, footer_col2, footer_col3 = st.columns(3)
+
+with footer_col1:
+    st.caption(f"📊 Daten: Yahoo Finance")
+
+with footer_col2:
+    st.caption(f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+
+with footer_col3:
+    st.caption("⚠️ Keine Anlageberatung")
+
+st.markdown("""
+---
+**🔐 Disclaimer:** Vigilanz-Cockpit ist ein Analyse-Tool für Informationszwecke. 
+Keine Anlageberatung oder Handelsempfehlung. Investieren Sie nur, wenn Sie die Risiken verstehen.
+""")
