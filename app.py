@@ -124,4 +124,30 @@ if ticker:
         st.caption(f"Sektor: {sector}")
 
         st.markdown(f"""
-        <div style="background:#1a2338; padding:1.5rem; border-radius:14px; text-align:center; border:2px solid {'#22c55e' if color=='
+        <div style="background:#1a2338; padding:1.5rem; border-radius:14px; text-align:center; border:2px solid {'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">
+            <h2 style="margin:0; color:{'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">{score}/45</h2>
+            <p style="margin:0.4rem 0 0 0; font-size:1.15rem;">{status}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        c1, c2, c3 = st.columns(3)
+        with c1: st.metric("Rule of 40", f"{round(rule_of_40, 1)}%")
+        with c2: st.metric("FCF Yield", f"{round(fcf_yield, 1)}%")
+        with c3: st.metric("Forward P/E", f"{round(pe_to_use, 1)}" if pe_to_use > 0 else "N/A")
+
+    with tab2:
+        st.subheader("📈 5-Jahres-Growth Chart")
+        hist['EMA200'] = hist['Close'].rolling(window=200).mean()
+        last_ema = hist['EMA200'].iloc[-1] if not pd.isna(hist['EMA200'].iloc[-1]) else current_price
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'], name='Kurs', line=dict(color='#60a5fa', width=2.5)))
+        fig.add_trace(go.Scatter(x=hist.index, y=hist['EMA200'], name='EMA 200', line=dict(color='#fbbf24', dash='dot')))
+
+        fig.add_hrect(y0=0, y1=last_ema, fillcolor="rgba(34,197,94,0.18)", line_width=0, annotation_text="🟢 Kaufzone")
+        fig.add_hrect(y0=last_ema, y1=hist['Close'].max()*1.35, fillcolor="rgba(239,68,68,0.18)", line_width=0, annotation_text="🔴 Zu teuer")
+
+        fig.update_layout(height=460, template="plotly_dark", yaxis_type="log", hovermode="x unified")
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.caption("🟢
