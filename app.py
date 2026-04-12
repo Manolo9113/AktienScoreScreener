@@ -2,8 +2,9 @@ import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
+import numpy as np
 
 st.set_page_config(page_title="Vigilanz-Cockpit", page_icon="🛡️", layout="wide")
 
@@ -26,11 +27,12 @@ st.title("🛡️ Vigilanz-Cockpit")
 # --- BRANCHEN-SPEZIFISCHE BENCHMARKS ---
 SECTOR_BENCHMARKS = {
     "Technology": {
-        "pe_range": (20, 35, 50, 80),  # green, yellow, orange, red
+        "pe_range": (20, 35, 50, 80),
         "margin_min": 15,
         "growth_min": 8,
         "debt_max": 1.0,
         "roe_min": 12,
+        "fcf_yield_min": 2,
         "emojis": "💻"
     },
     "Software": {
@@ -39,6 +41,7 @@ SECTOR_BENCHMARKS = {
         "growth_min": 10,
         "debt_max": 0.8,
         "roe_min": 15,
+        "fcf_yield_min": 3,
         "emojis": "⚙️"
     },
     "Internet": {
@@ -47,6 +50,7 @@ SECTOR_BENCHMARKS = {
         "growth_min": 15,
         "debt_max": 1.2,
         "roe_min": 10,
+        "fcf_yield_min": 1,
         "emojis": "🌐"
     },
     "Financial Services": {
@@ -55,6 +59,7 @@ SECTOR_BENCHMARKS = {
         "growth_min": 3,
         "debt_max": 8.0,
         "roe_min": 10,
+        "fcf_yield_min": 2,
         "emojis": "🏦"
     },
     "Healthcare": {
@@ -63,6 +68,7 @@ SECTOR_BENCHMARKS = {
         "growth_min": 5,
         "debt_max": 1.5,
         "roe_min": 12,
+        "fcf_yield_min": 2,
         "emojis": "⚕️"
     },
     "Pharmaceuticals": {
@@ -71,6 +77,7 @@ SECTOR_BENCHMARKS = {
         "growth_min": 3,
         "debt_max": 1.0,
         "roe_min": 15,
+        "fcf_yield_min": 2,
         "emojis": "💊"
     },
     "Consumer Cyclical": {
@@ -79,6 +86,7 @@ SECTOR_BENCHMARKS = {
         "growth_min": 3,
         "debt_max": 2.0,
         "roe_min": 8,
+        "fcf_yield_min": 3,
         "emojis": "🛍️"
     },
     "Consumer Defensive": {
@@ -87,6 +95,7 @@ SECTOR_BENCHMARKS = {
         "growth_min": 2,
         "debt_max": 2.0,
         "roe_min": 10,
+        "fcf_yield_min": 3,
         "emojis": "🥬"
     },
     "Industrials": {
@@ -95,6 +104,7 @@ SECTOR_BENCHMARKS = {
         "growth_min": 3,
         "debt_max": 2.5,
         "roe_min": 10,
+        "fcf_yield_min": 2,
         "emojis": "🏭"
     },
     "Energy": {
@@ -103,6 +113,7 @@ SECTOR_BENCHMARKS = {
         "growth_min": 2,
         "debt_max": 3.0,
         "roe_min": 8,
+        "fcf_yield_min": 4,
         "emojis": "⚡"
     },
     "Utilities": {
@@ -111,6 +122,7 @@ SECTOR_BENCHMARKS = {
         "growth_min": 1,
         "debt_max": 3.0,
         "roe_min": 8,
+        "fcf_yield_min": 3,
         "emojis": "💡"
     },
     "Real Estate": {
@@ -119,6 +131,7 @@ SECTOR_BENCHMARKS = {
         "growth_min": 2,
         "debt_max": 4.0,
         "roe_min": 6,
+        "fcf_yield_min": 3,
         "emojis": "🏠"
     },
     "Communication Services": {
@@ -127,6 +140,7 @@ SECTOR_BENCHMARKS = {
         "growth_min": 3,
         "debt_max": 2.0,
         "roe_min": 10,
+        "fcf_yield_min": 2,
         "emojis": "📱"
     },
     "Materials": {
@@ -135,23 +149,20 @@ SECTOR_BENCHMARKS = {
         "growth_min": 2,
         "debt_max": 2.5,
         "roe_min": 8,
+        "fcf_yield_min": 2,
         "emojis": "⛏️"
     }
 }
 
-# --- BEWERTUNGS-FUNKTIONEN MIT BRANCHE ---
+# --- BEWERTUNGS-FUNKTIONEN ---
 def get_sector_benchmark(sector):
-    """Hole Benchmark für Sektor, mit Fallback"""
+    """Hole Benchmark für Sektor"""
     if sector in SECTOR_BENCHMARKS:
         return SECTOR_BENCHMARKS[sector]
-    
-    # Standard Fallback für unbekannte Sektoren
     return SECTOR_BENCHMARKS["Technology"]
 
 def get_color_for_metric_with_sector(value, metric_type, sector):
-    """
-    Intelligente Farbgebung basierend auf Sektor
-    """
+    """Intelligente Farbgebung basierend auf Sektor"""
     if value <= 0 or value is None:
         return "gray", "N/A"
     
@@ -170,51 +181,72 @@ def get_color_for_metric_with_sector(value, metric_type, sector):
         else:
             return "red", f"Überbewertet (über {red})"
     
+    elif metric_type == "fcf_yield":
+        min_yield = benchmark["fcf_yield_min"]
+        if value < min_yield * 0.3:
+            return "red", f"Sehr niedrig"
+        elif value < min_yield * 0.7:
+            return "orange", f"Niedrig (unter {min_yield}%)"
+        elif value < min_yield:
+            return "yellow", f"Mittel ({min_yield}%)"
+        else:
+            return "green", f"Gut (über {min_yield}%)"
+    
+    elif metric_type == "div_yield":
+        if value < 1:
+            return "yellow", f"Niedrig"
+        elif value < 3:
+            return "green", f"Attraktiv"
+        elif value < 5:
+            return "yellow", f"Erhöht"
+        else:
+            return "orange", f"Sehr hoch"
+    
     elif metric_type == "margin":
         min_margin = benchmark["margin_min"]
         if value < min_margin * 0.5:
-            return "red", f"Sehr niedrig (unter {min_margin*0.5:.0f}%)"
+            return "red", f"Sehr niedrig"
         elif value < min_margin:
-            return "orange", f"Niedrig für Branche (unter {min_margin}%)"
+            return "orange", f"Niedrig"
         elif value < min_margin * 1.5:
-            return "yellow", f"Normal für Branche ({min_margin}-{min_margin*1.5:.0f}%)"
+            return "yellow", f"Normal"
         else:
-            return "green", f"Überdurchschnittlich (über {min_margin*1.5:.0f}%)"
+            return "green", f"Überdurchschnittlich"
     
     elif metric_type == "growth":
         min_growth = benchmark["growth_min"]
         if value < 0:
-            return "red", "Negatives Wachstum"
+            return "red", "Negativ"
         elif value < min_growth * 0.5:
-            return "orange", f"Unter Branchenschnitt"
+            return "orange", f"Unter Schnitt"
         elif value < min_growth:
-            return "yellow", f"Unter Erwartung (unter {min_growth}%)"
+            return "yellow", f"Unter Erwartung"
         elif value < min_growth * 2:
-            return "green", f"Gut für Branche ({min_growth}-{min_growth*2:.0f}%)"
+            return "green", f"Gut"
         else:
-            return "green", f"Außergewöhnlich (über {min_growth*2:.0f}%)"
+            return "green", f"Außergewöhnlich"
     
     elif metric_type == "debt":
         max_debt = benchmark["debt_max"]
         if value < max_debt * 0.5:
-            return "green", f"Sehr niedrig für Branche"
+            return "green", f"Sehr niedrig"
         elif value < max_debt:
-            return "green", f"Gesund für Branche (unter {max_debt}x)"
+            return "green", f"Gesund"
         elif value < max_debt * 1.5:
-            return "yellow", f"Erhöht für Branche ({max_debt}-{max_debt*1.5:.1f}x)"
+            return "yellow", f"Erhöht"
         else:
-            return "red", f"Hoch für Branche (über {max_debt*1.5:.1f}x)"
+            return "red", f"Hoch"
     
     elif metric_type == "roe":
         min_roe = benchmark["roe_min"]
         if value < min_roe * 0.5:
-            return "red", f"Schwach (unter {min_roe*0.5:.0f}%)"
+            return "red", f"Schwach"
         elif value < min_roe:
-            return "orange", f"Unter Branche (unter {min_roe}%)"
+            return "orange", f"Unter Branche"
         elif value < min_roe * 1.5:
-            return "green", f"Gut für Branche ({min_roe}-{min_roe*1.5:.0f}%)"
+            return "green", f"Gut"
         else:
-            return "green", f"Hervorragend (über {min_roe*1.5:.0f}%)"
+            return "green", f"Hervorragend"
     
     return "gray", "N/A"
 
@@ -248,20 +280,66 @@ def color_box(value, color, description=""):
     
     return f'<div style="background: {bg_colors[color]}; border-left: 4px solid {colors[color]}; padding: 12px; border-radius: 6px; margin: 8px 0;"><span style="color: {colors[color]}; font-weight: bold;">{emojis[color]} {value}</span>{desc_text}</div>'
 
-# --- AGGRESSIVE CACHING ---
+# --- BERECHNE PE HISTORISCH ---
+def calculate_pe_historical(ticker):
+    """Berechne KGV historisch basierend auf Earnings"""
+    try:
+        stock = yf.Ticker(ticker)
+        
+        # Hole Quarterly Earnings
+        quarterly_financials = stock.quarterly_financials
+        
+        if quarterly_financials.empty:
+            return None
+        
+        # Berechne TTM (Trailing Twelve Months) EPS
+        earnings_data = []
+        
+        for i in range(min(40, len(quarterly_financials.columns))):  # Letzte 10 Jahre (40 Quarters)
+            try:
+                quarter_date = quarterly_financials.columns[i]
+                net_income = quarterly_financials.loc['Net Income', quarter_date]
+                shares = stock.info.get('sharesOutstanding', 0)
+                
+                if net_income and shares > 0:
+                    # Berechne TTM
+                    if i + 3 < len(quarterly_financials.columns):
+                        ttm_income = quarterly_financials.iloc[:, i:i+4].loc['Net Income'].sum()
+                        ttm_eps = ttm_income / shares
+                        
+                        # Hole Preis für diesen Zeitpunkt
+                        year = quarter_date.year
+                        month = quarter_date.month
+                        
+                        earnings_data.append({
+                            'date': quarter_date,
+                            'eps': ttm_eps,
+                            'year': year
+                        })
+            except:
+                continue
+        
+        return pd.DataFrame(earnings_data) if earnings_data else None
+        
+    except Exception as e:
+        st.warning(f"⚠️ Historische KGV-Berechnung nicht möglich: {str(e)[:50]}")
+        return None
+
+# --- DATENLADUNG ---
 @st.cache_data(ttl=86400)
-def get_stock_data(ticker):
-    """Hole Daten mit Ratelimit-Handling"""
+def get_stock_data_extended(ticker):
+    """Hole Daten mit Preis + FCF + Dividenden + Bewertung"""
     ticker = ticker.strip().upper()
     
     try:
-        st.info(f"⏳ Lade {ticker}... (kann 10 Sekunden dauern)")
+        st.info(f"⏳ Lade {ticker}... (Preis, FCF, Dividenden, Bewertung)")
         
+        # Preis-Daten (10 Jahre)
         for attempt in range(3):
             try:
                 data = yf.download(
                     ticker, 
-                    start="2020-01-01",
+                    start="2014-01-01",
                     progress=False,
                     threads=False
                 )
@@ -272,30 +350,42 @@ def get_stock_data(ticker):
             except Exception as e:
                 if "429" in str(e) or "Too Many" in str(e):
                     wait = 5 * (attempt + 1)
-                    st.warning(f"⏳ Ratelimit - warte {wait}s...")
+                    st.warning(f"⏳ Ratelimit...")
                     time.sleep(wait)
                 else:
                     raise
         
         if data.empty:
-            return None, None
+            return None, None, None, None
         
-        time.sleep(2)
+        time.sleep(1)
         stock = yf.Ticker(ticker)
         info = stock.info
         
-        return data, info
+        # Cash Flow Historisch
+        cashflow = None
+        try:
+            cashflow = stock.cashflow
+        except:
+            pass
+        
+        # Dividenden Historisch
+        dividends = None
+        try:
+            dividends = stock.dividends
+        except:
+            pass
+        
+        return data, info, cashflow, dividends
         
     except Exception as e:
         error_msg = str(e)
         if "429" in error_msg or "Too Many" in error_msg:
-            st.error("""
-            ❌ **Zu viele Anfragen an Yahoo Finance**
-            """)
+            st.error("❌ **Zu viele Anfragen** → Warte 5 Min")
         else:
             st.error(f"❌ Fehler: {error_msg[:100]}")
         
-        return None, None
+        return None, None, None, None
 
 # Sidebar
 with st.sidebar:
@@ -303,12 +393,9 @@ with st.sidebar:
     
     popular = {
         "MSFT – Microsoft (Software)": "MSFT",
-        "AAPL – Apple (Technology)": "AAPL",
+        "AAPL – Apple (Tech)": "AAPL",
         "GOOGL – Alphabet (Internet)": "GOOGL",
         "AMZN – Amazon (Internet)": "AMZN",
-        "TSLA – Tesla (Automotive)": "TSLA",
-        "NVDA – NVIDIA (Technology)": "NVDA",
-        "META – Meta (Communication)": "META",
         "JNJ – Johnson&Johnson (Healthcare)": "JNJ",
         "PG – Procter&Gamble (Consumer)": "PG",
         "XOM – ExxonMobil (Energy)": "XOM",
@@ -327,7 +414,7 @@ if not ticker:
     st.stop()
 
 # --- DATEN LADEN ---
-data, info = get_stock_data(ticker)
+data, info, cashflow, dividends = get_stock_data_extended(ticker)
 
 if data is None or info is None:
     st.stop()
@@ -346,7 +433,7 @@ with col_header2:
     benchmark = get_sector_benchmark(sector)
     st.caption(f"📊 Benchmark: {benchmark['emojis']}")
 with col_header3:
-    st.caption(f"📍 Diese Bewertung ist an die Branche angepasst!")
+    st.caption(f"📍 Branchengerecht bewertet!")
 
 col1, col2, col3 = st.columns(3)
 
@@ -362,30 +449,29 @@ with col3:
 st.divider()
 
 # --- TABS ---
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📊 Kennzahlen",
     "📈 Chart",
+    "💰 FCF & Dividenden",
+    "💎 Bewertung Historisch",
     "💼 Bilanzdaten",
     "⚖️ Risikoanalyse",
-    "💰 Cashflow",
+    "💵 Cashflow",
     "📋 Details"
 ])
 
-# TAB 1: KENNZAHLEN MIT BRANCHENVERGLEICH
+# TAB 1: KENNZAHLEN
 with tab1:
     st.subheader("🎯 Kern-Kennzahlen (Branchenangepasst)")
     
     benchmark = get_sector_benchmark(sector)
     
-    # Info-Box
     st.info(f"""
     📌 **Branche:** {sector}
     
-    **Benchmarks für {sector}:**
+    **Benchmarks:**
     - KGV: {benchmark['pe_range'][1]}-{benchmark['pe_range'][2]} (normal)
-    - Bruttomarge: mindestens {benchmark['margin_min']}%
-    - Wachstum: mindestens {benchmark['growth_min']}%
-    - Schuldenquote: max {benchmark['debt_max']}x
+    - FCF Yield: {benchmark['fcf_yield_min']}%+ | Bruttomarge: {benchmark['margin_min']}%+
     """)
     
     m1, m2, m3, m4 = st.columns(4)
@@ -399,11 +485,8 @@ with tab1:
         fcf = info.get('freeCashflow', 0)
         market_cap = info.get('marketCap', 1)
         fcf_yield = (fcf / market_cap * 100) if market_cap > 0 else 0
-        if fcf_yield > 0:
-            color = "green" if fcf_yield > 3 else "yellow" if fcf_yield > 1 else "orange"
-        else:
-            color = "gray"
-        st.markdown(color_box(f"FCF Yield: {round(fcf_yield, 1) if fcf_yield > 0 else 'N/A'}%", color, "Cashflow Rendite"), unsafe_allow_html=True)
+        color, desc = get_color_for_metric_with_sector(fcf_yield, "fcf_yield", sector)
+        st.markdown(color_box(f"FCF Yield: {round(fcf_yield, 1) if fcf_yield > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
     with m3:
         debt_eq = info.get('debtToEquity', 0)
@@ -411,9 +494,9 @@ with tab1:
         st.markdown(color_box(f"Debt/Equity: {round(debt_eq, 2) if debt_eq > 0 else 'N/A'}", color, desc), unsafe_allow_html=True)
     
     with m4:
-        beta = info.get('beta', 1.0)
-        beta_color = "green" if 0.8 <= beta <= 1.2 else "yellow" if 0.6 <= beta <= 1.5 else "orange"
-        st.markdown(color_box(f"Beta: {round(beta, 2)}", beta_color, "Volatilität"), unsafe_allow_html=True)
+        div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
+        color, desc = get_color_for_metric_with_sector(div_yield, "div_yield", sector)
+        st.markdown(color_box(f"Div Yield: {round(div_yield, 2) if div_yield > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
     st.divider()
     st.subheader("📈 Rentabilitäts-Metriken")
@@ -462,11 +545,11 @@ with tab1:
     with g4:
         peg = info.get('pegRatio', 0)
         peg_color = "green" if 0.5 < peg < 1.5 else "yellow" if peg < 3 else "red"
-        st.markdown(color_box(f"PEG Ratio: {round(peg, 2) if peg > 0 else 'N/A'}", peg_color, "Wachstum vs Bewertung"), unsafe_allow_html=True)
+        st.markdown(color_box(f"PEG Ratio: {round(peg, 2) if peg > 0 else 'N/A'}", peg_color), unsafe_allow_html=True)
 
 # TAB 2: CHART
 with tab2:
-    st.subheader("📈 Preis-Chart (5 Jahre)")
+    st.subheader("📈 Preis-Chart (10 Jahre)")
     
     try:
         if not data.empty and len(data) > 10:
@@ -485,53 +568,335 @@ with tab2:
             fig.add_trace(go.Scatter(
                 x=data.index,
                 y=ema_200,
-                name='EMA 200 (Trend)',
+                name='EMA 200',
                 line=dict(color='#ff9500', dash='dot', width=1.5),
-                opacity=0.8,
-                hovertemplate='<b>EMA 200</b><br>%{x|%d.%m.%Y}<br>%{y:.2f} USD<extra></extra>'
+                opacity=0.8
             ))
             
             ema_50 = data['Close'].rolling(window=50).mean()
             fig.add_trace(go.Scatter(
                 x=data.index,
                 y=ema_50,
-                name='EMA 50 (Schnell)',
+                name='EMA 50',
                 line=dict(color='#00d4ff', dash='dash', width=1.5),
-                opacity=0.8,
-                hovertemplate='<b>EMA 50</b><br>%{x|%d.%m.%Y}<br>%{y:.2f} USD<extra></extra>'
+                opacity=0.8
             ))
             
             fig.update_layout(
-                title=f"📈 {ticker} - 5 Jahre Preisverlauf",
+                title=f"📈 {ticker} - 10 Jahre Preisverlauf",
                 xaxis_title="Datum",
                 yaxis_title="Preis (USD)",
                 template="plotly_dark",
                 height=500,
-                hovermode='x unified',
                 plot_bgcolor='#0f1419',
                 paper_bgcolor='#0f1419',
-                font=dict(color='#ccc', size=11),
-                margin=dict(l=50, r=50, t=80, b=50),
-                xaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128, 128, 128, 0.2)'),
-                yaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128, 128, 128, 0.2)')
+                margin=dict(l=50, r=50, t=80, b=50)
             )
             
             st.plotly_chart(fig, use_container_width=True)
             
-            last_ema200 = ema_200.iloc[-1]
-            if pd.notna(last_ema200):
-                if current_price < last_ema200:
-                    st.success(f"🟢 KAUFZONE - Preis unter EMA 200 (${round(last_ema200, 2)})")
-                else:
-                    st.warning(f"🔴 TEUER - Preis über EMA 200 (${round(last_ema200, 2)})")
         else:
-            st.warning("⚠️ Nicht genug Daten für Chart")
+            st.warning("⚠️ Nicht genug Daten")
             
     except Exception as e:
         st.error(f"❌ Chart-Fehler: {str(e)[:100]}")
 
-# TAB 3: BILANZDATEN
+# TAB 3: FCF & DIVIDENDEN
 with tab3:
+    st.subheader("💰 Free Cashflow & Dividenden Analyse")
+    
+    col_fcf1, col_fcf2, col_fcf3 = st.columns(3)
+    
+    with col_fcf1:
+        fcf = info.get('freeCashflow', 0)
+        st.metric("Aktueller FCF", f"${round(fcf / 1e9, 2)}B" if fcf > 0 else "N/A")
+    
+    with col_fcf2:
+        fcf_yield = (fcf / (info.get('marketCap', 1)) * 100) if info.get('marketCap', 0) > 0 else 0
+        color, desc = get_color_for_metric_with_sector(fcf_yield, "fcf_yield", sector)
+        st.markdown(color_box(f"FCF Yield: {round(fcf_yield, 2) if fcf_yield > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
+    
+    with col_fcf3:
+        div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
+        color, desc = get_color_for_metric_with_sector(div_yield, "div_yield", sector)
+        st.markdown(color_box(f"Div Yield: {round(div_yield, 2) if div_yield > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
+    
+    st.divider()
+    
+    # --- FCF HISTORISCH ---
+    if cashflow is not None and not cashflow.empty:
+        st.subheader("📊 FCF Trend (10 Jahre)")
+        
+        try:
+            ocf_data = cashflow.loc['Operating Cash Flow'] if 'Operating Cash Flow' in cashflow.index else cashflow.loc['Net Income']
+            capex_data = cashflow.loc['Capital Expenditure'] if 'Capital Expenditure' in cashflow.index else pd.Series()
+            
+            fcf_hist = ocf_data - capex_data.abs()
+            fcf_hist = fcf_hist.sort_index(ascending=True)
+            fcf_hist_10y = fcf_hist.tail(10)
+            
+            if not fcf_hist_10y.empty:
+                fig_fcf = go.Figure()
+                
+                fig_fcf.add_trace(go.Bar(
+                    x=[d.year for d in fcf_hist_10y.index],
+                    y=fcf_hist_10y.values / 1e9,
+                    name='Free Cashflow',
+                    marker=dict(
+                        color=['#22c55e' if v > 0 else '#ef4444' for v in fcf_hist_10y.values]
+                    )
+                ))
+                
+                avg_fcf = fcf_hist_10y.mean()
+                fig_fcf.add_hline(
+                    y=avg_fcf / 1e9,
+                    line_dash="dash",
+                    line_color="#eab308",
+                    annotation_text=f"Ø: ${round(avg_fcf / 1e9, 2)}B"
+                )
+                
+                fig_fcf.update_layout(
+                    title=f"📊 {ticker} - Free Cashflow",
+                    xaxis_title="Jahr",
+                    yaxis_title="FCF (Mrd. USD)",
+                    template="plotly_dark",
+                    height=400,
+                    plot_bgcolor='#0f1419',
+                    paper_bgcolor='#0f1419'
+                )
+                
+                st.plotly_chart(fig_fcf, use_container_width=True)
+                
+                stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+                with stat_col1:
+                    st.metric("Letztes Jahr", f"${round(fcf_hist_10y.iloc[-1] / 1e9, 2)}B")
+                with stat_col2:
+                    st.metric("Durchschnitt", f"${round(avg_fcf / 1e9, 2)}B")
+                with stat_col3:
+                    st.metric("Minimum", f"${round(fcf_hist_10y.min() / 1e9, 2)}B")
+                with stat_col4:
+                    st.metric("Maximum", f"${round(fcf_hist_10y.max() / 1e9, 2)}B")
+        
+        except Exception as e:
+            st.warning(f"⚠️ FCF-Historisch nicht verfügbar")
+    
+    st.divider()
+    
+    # --- DIVIDENDEN HISTORISCH ---
+    if dividends is not None and not dividends.empty:
+        st.subheader("💵 Dividenden Historisch")
+        
+        dividends = dividends.sort_index(ascending=True)
+        div_10y = dividends.tail(10)
+        
+        if not div_10y.empty:
+            fig_div = go.Figure()
+            
+            fig_div.add_trace(go.Bar(
+                x=[d.year for d in div_10y.index],
+                y=div_10y.values,
+                name='Dividende',
+                marker=dict(color='#22c55e')
+            ))
+            
+            avg_div = div_10y.mean()
+            fig_div.add_hline(
+                y=avg_div,
+                line_dash="dash",
+                line_color="#eab308",
+                annotation_text=f"Ø: ${round(avg_div, 2)}"
+            )
+            
+            fig_div.update_layout(
+                title=f"💵 {ticker} - Dividenden",
+                xaxis_title="Jahr",
+                yaxis_title="Dividende pro Aktie (USD)",
+                template="plotly_dark",
+                height=400,
+                plot_bgcolor='#0f1419',
+                paper_bgcolor='#0f1419'
+            )
+            
+            st.plotly_chart(fig_div, use_container_width=True)
+            
+            div_stat_col1, div_stat_col2, div_stat_col3, div_stat_col4 = st.columns(4)
+            
+            with div_stat_col1:
+                st.metric("Letzte Div", f"${round(div_10y.iloc[-1], 2)}")
+            
+            with div_stat_col2:
+                st.metric("Ø 10 Jahre", f"${round(avg_div, 2)}")
+            
+            with div_stat_col3:
+                cagr_div = ((div_10y.iloc[-1] / div_10y.iloc[0]) ** (1 / len(div_10y)) - 1) * 100 if len(div_10y) > 1 and div_10y.iloc[0] > 0 else 0
+                st.metric("Div CAGR", f"{round(cagr_div, 1)}%")
+            
+            with div_stat_col4:
+                st.metric("Jahre gezahlt", f"{len(div_10y)}")
+
+# TAB 4: BEWERTUNG HISTORISCH ***NEU***
+with tab4:
+    st.subheader("💎 Bewertung Historisch - KGV & Preis")
+    
+    st.info(f"""
+    📊 **Historische Bewertungs-Analyse:**
+    
+    Diese Tab zeigt wie die Bewertung (KGV) der Aktie über 10 Jahre variiert hat.
+    Hilft zu sehen ob die aktuelle Bewertung günstig oder teuer ist im Vergleich zur Historie.
+    """)
+    
+    try:
+        # Berechne PE historisch aus Preis + EPS Trend
+        stock = yf.Ticker(ticker)
+        quarterly_financials = stock.quarterly_financials
+        
+        if not quarterly_financials.empty:
+            pe_history = []
+            
+            # Hole letzte 8 Jahre = 32 Quarters
+            for i in range(min(32, len(quarterly_financials.columns))):
+                try:
+                    date = quarterly_financials.columns[i]
+                    year = date.year
+                    
+                    # TTM Net Income (letzte 4 Quarters)
+                    if i + 3 < len(quarterly_financials.columns):
+                        ttm = quarterly_financials.iloc[:, i:i+4].loc['Net Income'].sum()
+                        
+                        shares = info.get('sharesOutstanding', 1)
+                        if shares > 0 and ttm > 0:
+                            eps = ttm / shares
+                            
+                            # Hole Preis für dieses Datum (annähern)
+                            # Nutze Daten um das Datum
+                            price_data = data[data.index.year == year]
+                            if not price_data.empty:
+                                price = price_data['Close'].iloc[0]
+                                pe = price / eps if eps > 0 else 0
+                                
+                                if pe > 0 and pe < 500:  # Filter unrealistische Werte
+                                    pe_history.append({
+                                        'year': year,
+                                        'pe': pe,
+                                        'eps': eps,
+                                        'price': price
+                                    })
+                except:
+                    continue
+            
+            if pe_history:
+                pe_df = pd.DataFrame(pe_history).drop_duplicates(subset=['year']).sort_values('year')
+                
+                # Chart
+                fig_pe = go.Figure()
+                
+                fig_pe.add_trace(go.Scatter(
+                    x=pe_df['year'],
+                    y=pe_df['pe'],
+                    name='KGV',
+                    mode='lines+markers',
+                    line=dict(color='#00ff9d', width=2.5),
+                    marker=dict(size=8)
+                ))
+                
+                # Durchschnittslinie
+                avg_pe = pe_df['pe'].mean()
+                fig_pe.add_hline(
+                    y=avg_pe,
+                    line_dash="dash",
+                    line_color="#eab308",
+                    annotation_text=f"Ø: {round(avg_pe, 1)}",
+                    annotation_position="right"
+                )
+                
+                # Benchmark Bereich (für diese Branche)
+                benchmark_yellow = benchmark["pe_range"][1]
+                benchmark_red = benchmark["pe_range"][2]
+                
+                fig_pe.add_hspan(
+                    y0=0, y1=benchmark_yellow,
+                    fillcolor="green", opacity=0.1,
+                    annotation_text="🟢 Günstig", annotation_position="left"
+                )
+                fig_pe.add_hspan(
+                    y0=benchmark_yellow, y1=benchmark_red,
+                    fillcolor="yellow", opacity=0.1,
+                    annotation_text="🟡 Fair", annotation_position="left"
+                )
+                fig_pe.add_hspan(
+                    y0=benchmark_red, y1=max(pe_df['pe'].max() * 1.1, 100),
+                    fillcolor="red", opacity=0.1,
+                    annotation_text="🔴 Teuer", annotation_position="left"
+                )
+                
+                fig_pe.update_layout(
+                    title=f"💎 {ticker} - KGV Historisch (mit Branche-Benchmark)",
+                    xaxis_title="Jahr",
+                    yaxis_title="KGV",
+                    template="plotly_dark",
+                    height=450,
+                    plot_bgcolor='#0f1419',
+                    paper_bgcolor='#0f1419',
+                    hovermode='x unified'
+                )
+                
+                st.plotly_chart(fig_pe, use_container_width=True)
+                
+                # Statistiken
+                st.markdown("### 📊 KGV Statistiken")
+                
+                pe_stat_col1, pe_stat_col2, pe_stat_col3, pe_stat_col4 = st.columns(4)
+                
+                with pe_stat_col1:
+                    current_pe = pe_df['pe'].iloc[-1]
+                    st.metric("Aktuelles KGV", f"{round(current_pe, 1)}")
+                
+                with pe_stat_col2:
+                    st.metric("Ø Historisch", f"{round(avg_pe, 1)}")
+                
+                with pe_stat_col3:
+                    min_pe = pe_df['pe'].min()
+                    st.metric("Minimum (günstig)", f"{round(min_pe, 1)}")
+                
+                with pe_stat_col4:
+                    max_pe = pe_df['pe'].max()
+                    st.metric("Maximum (teuer)", f"{round(max_pe, 1)}")
+                
+                st.divider()
+                
+                # Bewertung
+                if current_pe < avg_pe * 0.8:
+                    st.success(f"🟢 GÜNSTIG - KGV {round(current_pe, 1)} unter 10-Jahr Schnitt ({round(avg_pe, 1)})")
+                elif current_pe < avg_pe:
+                    st.info(f"🟡 FAIR - KGV {round(current_pe, 1)} Nähe 10-Jahr Schnitt ({round(avg_pe, 1)})")
+                elif current_pe < avg_pe * 1.3:
+                    st.warning(f"🟠 TEUER - KGV {round(current_pe, 1)} über 10-Jahr Schnitt ({round(avg_pe, 1)})")
+                else:
+                    st.error(f"🔴 SEHR TEUER - KGV {round(current_pe, 1)} deutlich über 10-Jahr Schnitt ({round(avg_pe, 1)})")
+                
+                # Branche-Vergleich
+                st.divider()
+                st.markdown(f"""
+                ### 🏭 Branche-Benchmark: {sector}
+                
+                - **Günstiger Bereich:** KGV < {benchmark_yellow}
+                - **Fair/Normal:** KGV {benchmark_yellow}-{benchmark_red}
+                - **Teuer:** KGV > {benchmark_red}
+                
+                **Aktuelle Bewertung:** {round(current_pe, 1)}
+                """)
+            
+            else:
+                st.warning("⚠️ Nicht genug Daten für historische KGV-Berechnung")
+        
+        else:
+            st.warning("⚠️ Finanzdaten nicht verfügbar")
+    
+    except Exception as e:
+        st.warning(f"⚠️ Historische Bewertung nicht berechenbar: {str(e)[:50]}")
+
+# TAB 5: BILANZDATEN
+with tab5:
     st.subheader("💼 Bilanz & Finanzielle Leistung")
     
     b1, b2, b3, b4 = st.columns(4)
@@ -551,7 +916,7 @@ with tab3:
     with b4:
         quick_ratio = info.get('quickRatio', 0)
         qr_color = "green" if quick_ratio > 1 else "yellow" if quick_ratio > 0.5 else "red"
-        st.markdown(color_box(f"Quick Ratio: {round(quick_ratio, 2) if quick_ratio > 0 else 'N/A'}", qr_color, "Liquidität"), unsafe_allow_html=True)
+        st.markdown(color_box(f"Quick Ratio: {round(quick_ratio, 2) if quick_ratio > 0 else 'N/A'}", qr_color), unsafe_allow_html=True)
     
     st.divider()
     
@@ -560,7 +925,7 @@ with tab3:
     with b5:
         current_ratio = info.get('currentRatio', 0)
         cr_color = "green" if current_ratio > 1.5 else "yellow" if current_ratio > 1 else "red"
-        st.markdown(color_box(f"Liquiditätsquote: {round(current_ratio, 2) if current_ratio > 0 else 'N/A'}", cr_color), unsafe_allow_html=True)
+        st.markdown(color_box(f"Liquidität: {round(current_ratio, 2) if current_ratio > 0 else 'N/A'}", cr_color), unsafe_allow_html=True)
     
     with b6:
         roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
@@ -576,9 +941,9 @@ with tab3:
         bvps = info.get('bookValue', 0)
         st.metric("Book Value/Share", f"${round(bvps, 2)}" if bvps > 0 else "N/A")
 
-# TAB 4: RISIKOANALYSE
-with tab4:
-    st.subheader("⚠️ Risiko-Bewertung (Branchenangepasst)")
+# TAB 6: RISIKOANALYSE
+with tab6:
+    st.subheader("⚖️ Risiko-Bewertung")
     
     col_a, col_b = st.columns(2)
     
@@ -604,9 +969,9 @@ with tab4:
         color, desc = get_color_for_metric_with_sector(pe, "pe", sector)
         st.markdown(color_box(f"Bewertung (KGV): {round(pe, 1) if pe > 0 else 'N/A'}", color, desc), unsafe_allow_html=True)
 
-# TAB 5: CASHFLOW
-with tab5:
-    st.subheader("💰 Cashflow-Analyse")
+# TAB 7: CASHFLOW
+with tab7:
+    st.subheader("💵 Cashflow-Analyse")
     
     c1, c2, c3, c4 = st.columns(4)
     
@@ -624,11 +989,11 @@ with tab5:
     
     with c4:
         fcf_yield = (fcf / (info.get('marketCap', 1)) * 100) if info.get('marketCap', 0) > 0 else 0
-        fcf_color = "green" if fcf_yield > 4 else "yellow" if fcf_yield > 2 else "orange" if fcf_yield > 0 else "gray"
+        fcf_color = "green" if fcf_yield > 4 else "yellow" if fcf_yield > 2 else "orange"
         st.markdown(color_box(f"FCF Yield: {round(fcf_yield, 1) if fcf_yield > 0 else 'N/A'}%", fcf_color), unsafe_allow_html=True)
 
-# TAB 6: DETAILS
-with tab6:
+# TAB 8: DETAILS
+with tab8:
     st.subheader("📋 Alle Metriken - Tabelle")
     
     metrics_dict = {
@@ -637,7 +1002,6 @@ with tab6:
             "Marktcap",
             "Trailing P/E",
             "Forward P/E",
-            "PEG Ratio",
             "Book Value",
             "FCF Yield",
             "Dividend Yield",
@@ -662,7 +1026,6 @@ with tab6:
             f"${round(info.get('marketCap', 0) / 1e9, 1)}B",
             f"{round(info.get('trailingPE', 0), 2)}",
             f"{round(info.get('forwardPE', 0), 2)}",
-            f"{round(info.get('pegRatio', 0), 2)}",
             f"${round(info.get('bookValue', 0), 2)}",
             f"{round((info.get('freeCashflow', 0) / info.get('marketCap', 1)) * 100, 2)}%",
             f"{round(info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0, 2)}%",
@@ -686,23 +1049,6 @@ with tab6:
     
     df = pd.DataFrame(metrics_dict)
     st.dataframe(df, use_container_width=True, hide_index=True)
-    
-    st.divider()
-    st.markdown(f"""
-    ### 📊 Sektor-Benchmarks für {sector}
-    
-    **KGV-Range:** {benchmark['pe_range'][0]}-{benchmark['pe_range'][1]} (normal) bis {benchmark['pe_range'][2]}-{benchmark['pe_range'][3]} (teuer)
-    
-    **Margin-Erwartung:** Mindestens {benchmark['margin_min']}%
-    
-    **Wachstums-Erwartung:** Mindestens {benchmark['growth_min']}% pro Jahr
-    
-    **Max Schuldenquote:** {benchmark['debt_max']}x
-    
-    **ROE-Erwartung:** Mindestens {benchmark['roe_min']}%
-    
-    ⚠️ Diese Werte wurden speziell für den Sektor **{sector}** optimiert!
-    """)
 
 # Footer
 st.divider()
@@ -711,14 +1057,4 @@ st.markdown(f"""
 🏭 **Sektor:** {sector}  
 📅 **Stand:** {datetime.now().strftime('%d.%m.%Y %H:%M')}  
 ⚠️ **Disclaimer:** Keine Anlageberatung | Nur zu Informationszwecken
-
-### 🎨 Intelligente Farbcodierung:
-✅ Diese App bewertet Metriken **relativ zur Branche**, nicht absolut!
-
-Beispiele:
-- **Software (MSFT):** KGV 25 = 🟢 Normal (Benchmark: 25-40)
-- **Basiskonsumgüter (PG):** KGV 25 = 🔴 Teuer (Benchmark: 18-25)
-- **Energy (XOM):** KGV 10 = 🟢 Gut (Benchmark: 10-15)
-- **Tech (NVDA):** Margin 50% = 🟢 Normal (Benchmark: 15%+)
-- **Utility:** Margin 25% = 🟢 Gut (Benchmark: 8%+)
 """)
