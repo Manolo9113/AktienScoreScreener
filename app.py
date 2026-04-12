@@ -75,7 +75,7 @@ if ticker:
             st.error(f"Fehler beim Laden von {ticker}: {str(e)[:100]}")
             st.stop()
 
-    # ==================== SCORE (korrigiert) ====================
+    # ==================== SCORE ====================
     score = 0
     if rule_of_40 > 40:
         score += 18
@@ -124,5 +124,4 @@ if ticker:
         st.caption(f"Sektor: {sector}")
 
         st.markdown(f"""
-        <div style="background:#1a2338; padding:1.5rem; border-radius:14px; text-align:center; border:2px solid {'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">
-            <h2 style="margin:0; color:{'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">{score}/45</h2>
+        <div style="background:#1a2338; padding:1.5rem; border-radius:14px; text-align:center; border:2px solid {'#22c55e' if color=='
