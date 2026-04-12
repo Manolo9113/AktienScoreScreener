@@ -75,16 +75,54 @@ if ticker:
             st.error(f"Fehler beim Laden von {ticker}: {str(e)[:100]}")
             st.stop()
 
-    # ==================== SCORE ====================
+    # ==================== SCORE (korrigiert) ====================
     score = 0
-    score += 18 if rule_of_40 > 40 else 6
-    score += 12 if fcf_yield > 3 else 4
-    score += 10 if gross_margin > 55 else 5
-    score += 5 if rule_of_40 > 50 else 0
+    if rule_of_40 > 40:
+        score += 18
+    else:
+        score += 6
+
+    if fcf_yield > 3:
+        score += 12
+    else:
+        score += 4
+
+    if gross_margin > 55:
+        score += 10
+    else:
+        score += 5
+
+    if rule_of_40 > 50:
+        score += 5
 
     if pe_to_use > 65:
         score -= 16
     elif pe_to_use > 45:
         score -= 9
 
-    score -= 8 if debt_to_equity > 2.0 else
+    if debt_to_equity > 2.0:
+        score -= 8
+    if beta > 1.6:
+        score -= 7
+
+    score = max(0, min(score, 45))
+
+    status = "🚀 ELITE-QUALITÄT" if score >= 36 else "✅ Gute Qualität" if score >= 28 else "🟡 Vorsicht" if score >= 18 else "🔴 Erhebliche Bedenken"
+    color = "green" if score >= 28 else "orange" if score >= 18 else "red"
+
+    # ==================== TABS ====================
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Überblick", 
+        "📈 Growth Chart", 
+        "💰 Finanzentwicklung", 
+        "📋 Bilanz & Struktur", 
+        "⚖️ Bewertung & Risiko"
+    ])
+
+    with tab1:
+        st.subheader(f"{company_name} ({ticker})")
+        st.caption(f"Sektor: {sector}")
+
+        st.markdown(f"""
+        <div style="background:#1a2338; padding:1.5rem; border-radius:14px; text-align:center; border:2px solid {'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">
+            <h2 style="margin:0; color:{'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">{score}/45</h2>
