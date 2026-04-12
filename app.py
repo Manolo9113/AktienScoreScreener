@@ -69,7 +69,7 @@ if ticker:
             pe_to_use = forward_pe if forward_pe > 0 else trailing_pe
             debt_to_equity = (info.get('debtToEquity', 0) / 100) if info.get('debtToEquity', 0) > 10 else info.get('debtToEquity', 0)
             beta = info.get('beta', 1.0)
-            shares_outstanding = info.get('sharesOutstanding', 0) / 1_000_000  # in Millionen
+            shares_outstanding = info.get('sharesOutstanding', 0) / 1_000_000
 
         except Exception as e:
             st.error(f"Fehler: {e}")
@@ -77,56 +77,4 @@ if ticker:
 
     # ==================== SCORE ====================
     score = 0
-    score += 18 if rule_of_40 > 40 else 6
-    score += 12 if fcf_yield > 3 else 4
-    score += 10 if gross_margin > 55 else 5
-    score += 5 if rule_of_40 > 50 else 0
-
-    if pe_to_use > 65: score -= 16
-    elif pe_to_use > 45: score -= 9
-
-    score -= 8 if debt_to_equity > 2.0 else 0
-    score -= 7 if beta > 1.6 else 0
-    score = max(0, min(score, 45))
-
-    status = "🚀 ELITE-QUALITÄT" if score >= 36 else "✅ Gute Qualität" if score >= 28 else "🟡 Vorsicht" if score >= 18 else "🔴 Erhebliche Bedenken"
-    color = "green" if score >= 28 else "orange" if score >= 18 else "red"
-
-    # ==================== TABS ====================
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Überblick", 
-        "📈 Growth Chart", 
-        "💰 Finanzentwicklung", 
-        "📋 Bilanz & Struktur", 
-        "⚖️ Bewertung & Risiko"
-    ])
-
-    with tab1:
-        st.subheader(f"{company_name} ({ticker})")
-        st.caption(f"Sektor: {sector}")
-
-        st.markdown(f"""
-        <div style="background:#1a2338; padding:1.5rem; border-radius:14px; text-align:center; border:2px solid {'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">
-            <h2 style="margin:0; color:{'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">{score}/45</h2>
-            <p style="margin:0.4rem 0 0 0; font-size:1.15rem;">{status}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        c1, c2, c3 = st.columns(3)
-        with c1: st.metric("Rule of 40", f"{round(rule_of_40, 1)}%")
-        with c2: st.metric("FCF Yield", f"{round(fcf_yield, 1)}%")
-        with c3: st.metric("Forward P/E", f"{round(pe_to_use, 1)}" if pe_to_use > 0 else "N/A")
-
-    with tab2:
-        st.subheader("📈 5-Jahres-Growth Chart")
-        hist['EMA200'] = hist['Close'].rolling(window=200).mean()
-        last_ema = hist['EMA200'].iloc[-1] if not pd.isna(hist['EMA200'].iloc[-1]) else current_price
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'], name='Kurs', line=dict(color='#60a5fa', width=2.5)))
-        fig.add_trace(go.Scatter(x=hist.index, y=hist['EMA200'], name='EMA 200', line=dict(color='#fbbf24', dash='dot')))
-
-        fig.add_hrect(y0=0, y1=last_ema, fillcolor="rgba(34,197,94,0.18)", line_width=0, annotation_text="🟢 Kaufzone")
-        fig.add_hrect(y0=last_ema, y1=hist['Close'].max()*1.35, fillcolor="rgba(239,68,68,0.18)", line_width=0, annotation_text="🔴 Zu teuer")
-
-        fig.update_layout(height=
+    score += 18 if rule_of_40 >
