@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
 import pandas as pd
-from datetime import datetime, timedelta
 
 st.set_page_config(
     page_title="Vigilanz-Cockpit",
@@ -28,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🛡️ Vigilanz-Cockpit")
-st.caption("Operative Exzellenz • Faire Bewertung • Langfristige Qualität")
+st.caption("Operative Exzellenz • Faire Bewertung")
 
 # ==================== SIDEBAR ====================
 with st.sidebar:
@@ -70,6 +69,7 @@ if ticker:
             pe_to_use = forward_pe if forward_pe > 0 else trailing_pe
             debt_to_equity = (info.get('debtToEquity', 0) / 100) if info.get('debtToEquity', 0) > 10 else info.get('debtToEquity', 0)
             beta = info.get('beta', 1.0)
+            shares_outstanding = info.get('sharesOutstanding', 0) / 1_000_000  # in Millionen
 
         except Exception as e:
             st.error(f"Fehler: {e}")
@@ -129,33 +129,4 @@ if ticker:
         fig.add_hrect(y0=0, y1=last_ema, fillcolor="rgba(34,197,94,0.18)", line_width=0, annotation_text="🟢 Kaufzone")
         fig.add_hrect(y0=last_ema, y1=hist['Close'].max()*1.35, fillcolor="rgba(239,68,68,0.18)", line_width=0, annotation_text="🔴 Zu teuer")
 
-        fig.update_layout(height=460, template="plotly_dark", yaxis_type="log", hovermode="x unified")
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.caption("🟢 Unter EMA 200 = Kaufzone | 🔴 Über EMA 200 = Zu teuer")
-
-    with tab3:
-        st.subheader("💰 Finanzentwicklung")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.metric("Oper. Cashflow", "N/A", "N/A")
-            st.metric("Free Cash Flow", "N/A", "N/A")
-        with c2:
-            st.metric("Gewinn je Aktie", "N/A", "N/A")
-            st.metric("Umsatz je Aktie", "N/A", "N/A")
-
-    with tab4:
-        st.subheader("📋 Bilanz & Struktur")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.metric("Bruttomarge", f"{round(gross_margin, 1)}%")
-            st.metric("Debt/Equity", f"{round(debt_to_equity, 2)}×")
-        with c2:
-            st.metric("Beta", f"{round(beta, 2)}")
-
-    with tab5:
-        st.subheader("⚖️ Bewertung & Risiko")
-        st.metric("Trailing P/E", f"{round(trailing_pe, 1)}" if trailing_pe > 0 else "N/A")
-        st.metric("Forward P/E", f"{round(forward_pe, 1)}" if forward_pe > 0 else "N/A")
-
-    st.caption("Daten von Yahoo Finance • Keine Anlageberatung")
+        fig.update_layout(height=
