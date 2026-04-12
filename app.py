@@ -2,11 +2,18 @@ import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 import time
-import numpy as np
+import logging
 
-st.set_page_config(page_title="Vigilanz-Cockpit", page_icon="🛡️", layout="wide")
+# ===== DEBUG MODE =====
+DEBUG = True
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+st.set_page_config(page_title="Vigilanz-Cockpit 🛡️", page_icon="🛡️", layout="wide")
 
 st.markdown("""
 <style>
@@ -163,7 +170,7 @@ def get_sector_benchmark(sector):
 
 def get_color_for_metric_with_sector(value, metric_type, sector):
     """Intelligente Farbgebung basierend auf Sektor"""
-    if value <= 0 or value is None:
+    if value is None or (isinstance(value, (int, float)) and (value <= 0 or np.isnan(value) or np.isinf(value))):
         return "gray", "N/A"
     
     benchmark = get_sector_benchmark(sector)
@@ -280,53 +287,21 @@ def color_box(value, color, description=""):
     
     return f'<div style="background: {bg_colors[color]}; border-left: 4px solid {colors[color]}; padding: 12px; border-radius: 6px; margin: 8px 0;"><span style="color: {colors[color]}; font-weight: bold;">{emojis[color]} {value}</span>{desc_text}</div>'
 
-# --- BERECHNE PE HISTORISCH ---
-def calculate_pe_historical(ticker):
-    """Berechne KGV historisch basierend auf Earnings"""
+def safe_get_float(dictionary, key, default=0):
+    """Sichere Abfrage von Floats"""
     try:
-        stock = yf.Ticker(ticker)
-        
-        # Hole Quarterly Earnings
-        quarterly_financials = stock.quarterly_financials
-        
-        if quarterly_financials.empty:
-            return None
-        
-        # Berechne TTM (Trailing Twelve Months) EPS
-        earnings_data = []
-        
-        for i in range(min(40, len(quarterly_financials.columns))):  # Letzte 10 Jahre (40 Quarters)
-            try:
-                quarter_date = quarterly_financials.columns[i]
-                net_income = quarterly_financials.loc['Net Income', quarter_date]
-                shares = stock.info.get('sharesOutstanding', 0)
-                
-                if net_income and shares > 0:
-                    # Berechne TTM
-                    if i + 3 < len(quarterly_financials.columns):
-                        ttm_income = quarterly_financials.iloc[:, i:i+4].loc['Net Income'].sum()
-                        ttm_eps = ttm_income / shares
-                        
-                        # Hole Preis für diesen Zeitpunkt
-                        year = quarter_date.year
-                        month = quarter_date.month
-                        
-                        earnings_data.append({
-                            'date': quarter_date,
-                            'eps': ttm_eps,
-                            'year': year
-                        })
-            except:
-                continue
-        
-        return pd.DataFrame(earnings_data) if earnings_data else None
-        
-    except Exception as e:
-        st.warning(f"⚠️ Historische KGV-Berechnung nicht möglich: {str(e)[:50]}")
-        return None
+        value = dictionary.get(key, default)
+        if value is None:
+            return default
+        value = float(value)
+        if np.isnan(value) or np.isinf(value):
+            return default
+        return value
+    except:
+        return default
 
-# --- DATENLADUNG ---
-@st.cache_data(ttl=86400)
+# --- DATENLADUNG MIT DEBUG ---
+@st.cache_data(ttl=3600)
 def get_stock_data_extended(ticker):
     """Hole Daten mit Preis + FCF + Dividenden + Bewertung"""
     ticker = ticker.strip().upper()
@@ -345,46 +320,64 @@ def get_stock_data_extended(ticker):
                 )
                 
                 if not data.empty:
+                    if DEBUG:
+                        st.success(f"✅ Preis-Daten geladen: {len(data)} Zeilen")
                     break
                     
             except Exception as e:
                 if "429" in str(e) or "Too Many" in str(e):
                     wait = 5 * (attempt + 1)
-                    st.warning(f"⏳ Ratelimit...")
+                    st.warning(f"⏳ Ratelimit - warte {wait}s...")
                     time.sleep(wait)
                 else:
+                    if DEBUG:
+                        st.error(f"❌ Fehler Versuch {attempt + 1}: {str(e)[:100]}")
                     raise
         
-        if data.empty:
+        if data is None or data.empty:
+            st.error("❌ Keine Preis-Daten!")
+            if DEBUG:
+                st.write("data ist:", data)
             return None, None, None, None
         
         time.sleep(1)
         stock = yf.Ticker(ticker)
         info = stock.info
         
-        # Cash Flow Historisch
+        if DEBUG:
+            st.info(f"✅ Info geladen: {len(info)} Keys")
+            st.write(f"Sector: {info.get('sector', 'N/A')}")
+            st.write(f"Market Cap: ${info.get('marketCap', 'N/A')}")
+            st.write(f"Trailing PE: {info.get('trailingPE', 'N/A')}")
+        
+        # Cash Flow
         cashflow = None
         try:
             cashflow = stock.cashflow
-        except:
-            pass
+            if cashflow is not None and not cashflow.empty:
+                if DEBUG:
+                    st.info(f"✅ Cashflow geladen: {cashflow.shape}")
+        except Exception as e:
+            if DEBUG:
+                st.warning(f"⚠️ Cashflow nicht verfügbar: {str(e)[:50]}")
         
-        # Dividenden Historisch
+        # Dividenden
         dividends = None
         try:
             dividends = stock.dividends
-        except:
-            pass
+            if dividends is not None and not dividends.empty:
+                if DEBUG:
+                    st.info(f"✅ Dividenden geladen: {len(dividends)} Einträge")
+        except Exception as e:
+            if DEBUG:
+                st.warning(f"⚠️ Dividenden nicht verfügbar: {str(e)[:50]}")
         
         return data, info, cashflow, dividends
         
     except Exception as e:
-        error_msg = str(e)
-        if "429" in error_msg or "Too Many" in error_msg:
-            st.error("❌ **Zu viele Anfragen** → Warte 5 Min")
-        else:
-            st.error(f"❌ Fehler: {error_msg[:100]}")
-        
+        st.error(f"❌ Kritischer Fehler: {str(e)}")
+        if DEBUG:
+            st.write(f"Full error: {e}")
         return None, None, None, None
 
 # Sidebar
@@ -399,6 +392,7 @@ with st.sidebar:
         "JNJ – Johnson&Johnson (Healthcare)": "JNJ",
         "PG – Procter&Gamble (Consumer)": "PG",
         "XOM – ExxonMobil (Energy)": "XOM",
+        "NVDA – NVIDIA (Tech)": "NVDA",
         "Eigener Ticker": ""
     }
     
@@ -417,10 +411,11 @@ if not ticker:
 data, info, cashflow, dividends = get_stock_data_extended(ticker)
 
 if data is None or info is None:
+    st.error("Daten konnten nicht geladen werden")
     st.stop()
 
 # --- BASIS-METRIKEN ---
-current_price = data['Close'].iloc[-1]
+current_price = data['Close'].iloc[-1] if not data.empty else 0
 company_name = info.get('longName', ticker)
 sector = info.get('sector', 'Technology')
 
@@ -440,10 +435,10 @@ col1, col2, col3 = st.columns(3)
 with col1:
     st.metric("💰 Kurs", f"${round(current_price, 2)}")
 with col2:
-    market_cap = info.get('marketCap', 0)
+    market_cap = safe_get_float(info, 'marketCap')
     st.metric("📊 Marktcap", f"${round(market_cap / 1e9, 1)}B" if market_cap > 0 else "N/A")
 with col3:
-    pe = info.get('trailingPE', 0)
+    pe = safe_get_float(info, 'trailingPE')
     st.metric("📈 KGV", f"{round(pe, 1)}" if pe > 0 else "N/A")
 
 st.divider()
@@ -477,24 +472,24 @@ with tab1:
     m1, m2, m3, m4 = st.columns(4)
     
     with m1:
-        pe = info.get('trailingPE', 0)
+        pe = safe_get_float(info, 'trailingPE')
         color, desc = get_color_for_metric_with_sector(pe, "pe", sector)
         st.markdown(color_box(f"KGV: {round(pe, 1) if pe > 0 else 'N/A'}", color, desc), unsafe_allow_html=True)
     
     with m2:
-        fcf = info.get('freeCashflow', 0)
-        market_cap = info.get('marketCap', 1)
-        fcf_yield = (fcf / market_cap * 100) if market_cap > 0 else 0
+        fcf = safe_get_float(info, 'freeCashflow')
+        market_cap = safe_get_float(info, 'marketCap', 1)
+        fcf_yield = (fcf / market_cap * 100) if market_cap > 0 and fcf > 0 else 0
         color, desc = get_color_for_metric_with_sector(fcf_yield, "fcf_yield", sector)
         st.markdown(color_box(f"FCF Yield: {round(fcf_yield, 1) if fcf_yield > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
     with m3:
-        debt_eq = info.get('debtToEquity', 0)
+        debt_eq = safe_get_float(info, 'debtToEquity')
         color, desc = get_color_for_metric_with_sector(debt_eq, "debt", sector)
         st.markdown(color_box(f"Debt/Equity: {round(debt_eq, 2) if debt_eq > 0 else 'N/A'}", color, desc), unsafe_allow_html=True)
     
     with m4:
-        div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
+        div_yield = safe_get_float(info, 'dividendYield') * 100 if info.get('dividendYield') else 0
         color, desc = get_color_for_metric_with_sector(div_yield, "div_yield", sector)
         st.markdown(color_box(f"Div Yield: {round(div_yield, 2) if div_yield > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
@@ -504,22 +499,22 @@ with tab1:
     r1, r2, r3, r4 = st.columns(4)
     
     with r1:
-        gm = info.get('grossMargins', 0) * 100 if info.get('grossMargins') else 0
+        gm = safe_get_float(info, 'grossMargins') * 100 if info.get('grossMargins') else 0
         color, desc = get_color_for_metric_with_sector(gm, "margin", sector)
         st.markdown(color_box(f"Gross Margin: {round(gm, 1) if gm > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
     with r2:
-        om = info.get('operatingMargins', 0) * 100 if info.get('operatingMargins') else 0
+        om = safe_get_float(info, 'operatingMargins') * 100 if info.get('operatingMargins') else 0
         color, desc = get_color_for_metric_with_sector(om, "margin", sector)
         st.markdown(color_box(f"Operating Margin: {round(om, 1) if om > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
     with r3:
-        pm = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
+        pm = safe_get_float(info, 'profitMargins') * 100 if info.get('profitMargins') else 0
         color, desc = get_color_for_metric_with_sector(pm, "margin", sector)
         st.markdown(color_box(f"Profit Margin: {round(pm, 1) if pm > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
     with r4:
-        roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
+        roe = safe_get_float(info, 'returnOnEquity') * 100 if info.get('returnOnEquity') else 0
         color, desc = get_color_for_metric_with_sector(roe, "roe", sector)
         st.markdown(color_box(f"ROE: {round(roe, 1) if roe > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
@@ -529,77 +524,121 @@ with tab1:
     g1, g2, g3, g4 = st.columns(4)
     
     with g1:
-        rg = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
+        rg = safe_get_float(info, 'revenueGrowth') * 100 if info.get('revenueGrowth') else 0
         color, desc = get_color_for_metric_with_sector(rg, "growth", sector)
         st.markdown(color_box(f"Revenue Growth: {round(rg, 1) if rg != 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
     with g2:
-        eg = info.get('earningsGrowth', 0) * 100 if info.get('earningsGrowth') else 0
+        eg = safe_get_float(info, 'earningsGrowth') * 100 if info.get('earningsGrowth') else 0
         color, desc = get_color_for_metric_with_sector(eg, "growth", sector)
         st.markdown(color_box(f"Earnings Growth: {round(eg, 1) if eg != 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
     with g3:
-        eps = info.get('trailingEps', 0)
+        eps = safe_get_float(info, 'trailingEps')
         st.metric("EPS", f"${round(eps, 2)}" if eps > 0 else "N/A")
     
     with g4:
-        peg = info.get('pegRatio', 0)
+        peg = safe_get_float(info, 'pegRatio')
         peg_color = "green" if 0.5 < peg < 1.5 else "yellow" if peg < 3 else "red"
         st.markdown(color_box(f"PEG Ratio: {round(peg, 2) if peg > 0 else 'N/A'}", peg_color), unsafe_allow_html=True)
 
-# TAB 2: CHART
+# TAB 2: CHART MIT DEBUG
 with tab2:
     st.subheader("📈 Preis-Chart (10 Jahre)")
     
+    if DEBUG:
+        col_debug1, col_debug2, col_debug3 = st.columns(3)
+        with col_debug1:
+            st.write(f"📊 Data Shape: {data.shape if data is not None else 'None'}")
+        with col_debug2:
+            st.write(f"📊 Data Empty: {data.empty if data is not None else 'N/A'}")
+        with col_debug3:
+            st.write(f"📊 Data Dtypes:\n{data.dtypes if data is not None else 'None'}")
+    
     try:
-        if not data.empty and len(data) > 10:
-            
-            fig = go.Figure()
-            
-            fig.add_trace(go.Scatter(
-                x=data.index,
-                y=data['Close'],
-                name='Schlusskurs',
-                line=dict(color='#00ff9d', width=2.5),
-                hovertemplate='<b>Schlusskurs</b><br>%{x|%d.%m.%Y}<br>%{y:.2f} USD<extra></extra>'
-            ))
-            
-            ema_200 = data['Close'].rolling(window=200).mean()
-            fig.add_trace(go.Scatter(
-                x=data.index,
-                y=ema_200,
-                name='EMA 200',
-                line=dict(color='#ff9500', dash='dot', width=1.5),
-                opacity=0.8
-            ))
-            
-            ema_50 = data['Close'].rolling(window=50).mean()
-            fig.add_trace(go.Scatter(
-                x=data.index,
-                y=ema_50,
-                name='EMA 50',
-                line=dict(color='#00d4ff', dash='dash', width=1.5),
-                opacity=0.8
-            ))
-            
-            fig.update_layout(
-                title=f"📈 {ticker} - 10 Jahre Preisverlauf",
-                xaxis_title="Datum",
-                yaxis_title="Preis (USD)",
-                template="plotly_dark",
-                height=500,
-                plot_bgcolor='#0f1419',
-                paper_bgcolor='#0f1419',
-                margin=dict(l=50, r=50, t=80, b=50)
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
+        if data is None or data.empty:
+            st.error("❌ Keine Daten für Chart vorhanden")
+        elif len(data) < 10:
+            st.error(f"❌ Zu wenig Daten: {len(data)} Zeilen (brauche 10+)")
         else:
-            st.warning("⚠️ Nicht genug Daten")
+            # Clean data
+            data_clean = data[['Close']].copy().dropna()
             
+            if DEBUG:
+                st.write(f"🧹 Clean data shape: {data_clean.shape}")
+                st.write(f"🧹 Last 5 rows:\n{data_clean.tail()}")
+            
+            if len(data_clean) > 10 and not data_clean['Close'].empty:
+                fig = go.Figure()
+                
+                # Hauptlinie
+                fig.add_trace(go.Scatter(
+                    x=data_clean.index,
+                    y=data_clean['Close'],
+                    name='Schlusskurs',
+                    line=dict(color='#00ff9d', width=2.5),
+                    hovertemplate='<b>Schlusskurs</b><br>%{x|%d.%m.%Y}<br>%{y:.2f} USD<extra></extra>'
+                ))
+                
+                # EMA 200
+                ema_200 = data_clean['Close'].rolling(window=200).mean()
+                if not ema_200.empty:
+                    fig.add_trace(go.Scatter(
+                        x=data_clean.index,
+                        y=ema_200,
+                        name='EMA 200',
+                        line=dict(color='#ff9500', dash='dot', width=1.5),
+                        opacity=0.8,
+                        hovertemplate='<b>EMA 200</b><br>%{x|%d.%m.%Y}<br>%{y:.2f} USD<extra></extra>'
+                    ))
+                
+                # EMA 50
+                ema_50 = data_clean['Close'].rolling(window=50).mean()
+                if not ema_50.empty:
+                    fig.add_trace(go.Scatter(
+                        x=data_clean.index,
+                        y=ema_50,
+                        name='EMA 50',
+                        line=dict(color='#00d4ff', dash='dash', width=1.5),
+                        opacity=0.8,
+                        hovertemplate='<b>EMA 50</b><br>%{x|%d.%m.%Y}<br>%{y:.2f} USD<extra></extra>'
+                    ))
+                
+                fig.update_layout(
+                    title=f"📈 {ticker} - 10 Jahre Preisverlauf",
+                    xaxis_title="Datum",
+                    yaxis_title="Preis (USD)",
+                    template="plotly_dark",
+                    height=500,
+                    hovermode='x unified',
+                    plot_bgcolor='#0f1419',
+                    paper_bgcolor='#0f1419',
+                    font=dict(color='#ccc'),
+                    margin=dict(l=50, r=50, t=80, b=50),
+                    xaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128, 128, 128, 0.2)'),
+                    yaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128, 128, 128, 0.2)')
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Info
+                last_ema200 = ema_200.iloc[-1] if not pd.isna(ema_200.iloc[-1]) else None
+                if last_ema200:
+                    if current_price < last_ema200:
+                        st.success(f"🟢 KAUFZONE - Preis (${round(current_price, 2)}) unter EMA 200 (${round(last_ema200, 2)})")
+                    else:
+                        st.warning(f"🔴 TEUER - Preis (${round(current_price, 2)}) über EMA 200 (${round(last_ema200, 2)})")
+            else:
+                st.error(f"❌ Zu wenig Clean-Daten: {len(data_clean)}")
+                if DEBUG:
+                    st.write(f"Close Series: {data_clean['Close'].describe()}")
+    
     except Exception as e:
-        st.error(f"❌ Chart-Fehler: {str(e)[:100]}")
+        st.error(f"❌ Chart-Fehler: {str(e)}")
+        if DEBUG:
+            st.write(f"Full error: {e}")
+            import traceback
+            st.write(traceback.format_exc())
 
 # TAB 3: FCF & DIVIDENDEN
 with tab3:
@@ -608,42 +647,49 @@ with tab3:
     col_fcf1, col_fcf2, col_fcf3 = st.columns(3)
     
     with col_fcf1:
-        fcf = info.get('freeCashflow', 0)
+        fcf = safe_get_float(info, 'freeCashflow')
         st.metric("Aktueller FCF", f"${round(fcf / 1e9, 2)}B" if fcf > 0 else "N/A")
     
     with col_fcf2:
-        fcf_yield = (fcf / (info.get('marketCap', 1)) * 100) if info.get('marketCap', 0) > 0 else 0
+        market_cap = safe_get_float(info, 'marketCap', 1)
+        fcf_yield = (fcf / market_cap * 100) if market_cap > 0 and fcf > 0 else 0
         color, desc = get_color_for_metric_with_sector(fcf_yield, "fcf_yield", sector)
         st.markdown(color_box(f"FCF Yield: {round(fcf_yield, 2) if fcf_yield > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
     with col_fcf3:
-        div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
+        div_yield = safe_get_float(info, 'dividendYield') * 100 if info.get('dividendYield') else 0
         color, desc = get_color_for_metric_with_sector(div_yield, "div_yield", sector)
         st.markdown(color_box(f"Div Yield: {round(div_yield, 2) if div_yield > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
     st.divider()
     
-    # --- FCF HISTORISCH ---
+    # FCF HISTORISCH
     if cashflow is not None and not cashflow.empty:
         st.subheader("📊 FCF Trend (10 Jahre)")
         
         try:
-            ocf_data = cashflow.loc['Operating Cash Flow'] if 'Operating Cash Flow' in cashflow.index else cashflow.loc['Net Income']
+            ocf_data = cashflow.loc['Operating Cash Flow'] if 'Operating Cash Flow' in cashflow.index else cashflow.iloc[0]
             capex_data = cashflow.loc['Capital Expenditure'] if 'Capital Expenditure' in cashflow.index else pd.Series()
             
             fcf_hist = ocf_data - capex_data.abs()
             fcf_hist = fcf_hist.sort_index(ascending=True)
             fcf_hist_10y = fcf_hist.tail(10)
             
-            if not fcf_hist_10y.empty:
+            if DEBUG:
+                st.write(f"FCF Historic data points: {len(fcf_hist_10y)}")
+            
+            if not fcf_hist_10y.empty and len(fcf_hist_10y) > 0:
                 fig_fcf = go.Figure()
                 
+                years = [d.year for d in fcf_hist_10y.index]
+                values = fcf_hist_10y.values / 1e9
+                
                 fig_fcf.add_trace(go.Bar(
-                    x=[d.year for d in fcf_hist_10y.index],
-                    y=fcf_hist_10y.values / 1e9,
+                    x=years,
+                    y=values,
                     name='Free Cashflow',
                     marker=dict(
-                        color=['#22c55e' if v > 0 else '#ef4444' for v in fcf_hist_10y.values]
+                        color=['#22c55e' if v > 0 else '#ef4444' for v in values]
                     )
                 ))
                 
@@ -652,13 +698,14 @@ with tab3:
                     y=avg_fcf / 1e9,
                     line_dash="dash",
                     line_color="#eab308",
-                    annotation_text=f"Ø: ${round(avg_fcf / 1e9, 2)}B"
+                    annotation_text=f"Ø: ${round(avg_fcf / 1e9, 2)}B",
+                    annotation_position="right"
                 )
                 
                 fig_fcf.update_layout(
-                    title=f"📊 {ticker} - Free Cashflow",
+                    title=f"📊 {ticker} - Free Cashflow (10 Jahre)",
                     xaxis_title="Jahr",
-                    yaxis_title="FCF (Mrd. USD)",
+                    yaxis_title="FCF (Milliarden USD)",
                     template="plotly_dark",
                     height=400,
                     plot_bgcolor='#0f1419',
@@ -676,26 +723,32 @@ with tab3:
                     st.metric("Minimum", f"${round(fcf_hist_10y.min() / 1e9, 2)}B")
                 with stat_col4:
                     st.metric("Maximum", f"${round(fcf_hist_10y.max() / 1e9, 2)}B")
-        
+            else:
+                st.info("ℹ️ Nicht genug FCF-Historisch verfügbar")
         except Exception as e:
-            st.warning(f"⚠️ FCF-Historisch nicht verfügbar")
+            st.warning(f"⚠️ FCF-Historisch nicht verfügbar: {str(e)[:50]}")
     
     st.divider()
     
-    # --- DIVIDENDEN HISTORISCH ---
+    # DIVIDENDEN HISTORISCH
     if dividends is not None and not dividends.empty:
-        st.subheader("💵 Dividenden Historisch")
+        st.subheader("💵 Dividenden Historisch (10 Jahre)")
         
-        dividends = dividends.sort_index(ascending=True)
-        div_10y = dividends.tail(10)
+        dividends_sorted = dividends.sort_index(ascending=True)
+        div_10y = dividends_sorted.tail(10)
+        
+        if DEBUG:
+            st.write(f"Dividenden data points: {len(div_10y)}")
         
         if not div_10y.empty:
             fig_div = go.Figure()
             
+            years_div = [d.year for d in div_10y.index]
+            
             fig_div.add_trace(go.Bar(
-                x=[d.year for d in div_10y.index],
+                x=years_div,
                 y=div_10y.values,
-                name='Dividende',
+                name='Dividende pro Aktie',
                 marker=dict(color='#22c55e')
             ))
             
@@ -704,11 +757,12 @@ with tab3:
                 y=avg_div,
                 line_dash="dash",
                 line_color="#eab308",
-                annotation_text=f"Ø: ${round(avg_div, 2)}"
+                annotation_text=f"Ø: ${round(avg_div, 2)}",
+                annotation_position="right"
             )
             
             fig_div.update_layout(
-                title=f"💵 {ticker} - Dividenden",
+                title=f"💵 {ticker} - Dividenden (10 Jahre)",
                 xaxis_title="Jahr",
                 yaxis_title="Dividende pro Aktie (USD)",
                 template="plotly_dark",
@@ -728,13 +782,18 @@ with tab3:
                 st.metric("Ø 10 Jahre", f"${round(avg_div, 2)}")
             
             with div_stat_col3:
-                cagr_div = ((div_10y.iloc[-1] / div_10y.iloc[0]) ** (1 / len(div_10y)) - 1) * 100 if len(div_10y) > 1 and div_10y.iloc[0] > 0 else 0
+                if len(div_10y) > 1 and div_10y.iloc[0] > 0:
+                    cagr_div = ((div_10y.iloc[-1] / div_10y.iloc[0]) ** (1 / (len(div_10y) - 1)) - 1) * 100
+                else:
+                    cagr_div = 0
                 st.metric("Div CAGR", f"{round(cagr_div, 1)}%")
             
             with div_stat_col4:
                 st.metric("Jahre gezahlt", f"{len(div_10y)}")
+    else:
+        st.info("ℹ️ Keine Dividenden verfügbar")
 
-# TAB 4: BEWERTUNG HISTORISCH ***NEU***
+# TAB 4: BEWERTUNG HISTORISCH
 with tab4:
     st.subheader("💎 Bewertung Historisch - KGV & Preis")
     
@@ -742,39 +801,41 @@ with tab4:
     📊 **Historische Bewertungs-Analyse:**
     
     Diese Tab zeigt wie die Bewertung (KGV) der Aktie über 10 Jahre variiert hat.
-    Hilft zu sehen ob die aktuelle Bewertung günstig oder teuer ist im Vergleich zur Historie.
+    Hilft zu sehen ob die aktuelle Bewertung günstig oder teuer ist.
     """)
     
     try:
-        # Berechne PE historisch aus Preis + EPS Trend
         stock = yf.Ticker(ticker)
         quarterly_financials = stock.quarterly_financials
         
-        if not quarterly_financials.empty:
+        if DEBUG:
+            st.write(f"Quarterly Financials Shape: {quarterly_financials.shape if quarterly_financials is not None else 'None'}")
+        
+        if quarterly_financials is not None and not quarterly_financials.empty:
             pe_history = []
             
-            # Hole letzte 8 Jahre = 32 Quarters
             for i in range(min(32, len(quarterly_financials.columns))):
                 try:
                     date = quarterly_financials.columns[i]
                     year = date.year
                     
-                    # TTM Net Income (letzte 4 Quarters)
                     if i + 3 < len(quarterly_financials.columns):
-                        ttm = quarterly_financials.iloc[:, i:i+4].loc['Net Income'].sum()
+                        net_income_col = quarterly_financials.columns[i:i+4]
+                        if 'Net Income' in quarterly_financials.index:
+                            ttm = quarterly_financials.loc['Net Income', net_income_col].sum()
+                        else:
+                            ttm = quarterly_financials.iloc[0, i:i+4].sum()
                         
-                        shares = info.get('sharesOutstanding', 1)
+                        shares = safe_get_float(info, 'sharesOutstanding', 1)
                         if shares > 0 and ttm > 0:
                             eps = ttm / shares
                             
-                            # Hole Preis für dieses Datum (annähern)
-                            # Nutze Daten um das Datum
                             price_data = data[data.index.year == year]
                             if not price_data.empty:
                                 price = price_data['Close'].iloc[0]
                                 pe = price / eps if eps > 0 else 0
                                 
-                                if pe > 0 and pe < 500:  # Filter unrealistische Werte
+                                if pe > 0 and pe < 500:
                                     pe_history.append({
                                         'year': year,
                                         'pe': pe,
@@ -787,7 +848,10 @@ with tab4:
             if pe_history:
                 pe_df = pd.DataFrame(pe_history).drop_duplicates(subset=['year']).sort_values('year')
                 
-                # Chart
+                if DEBUG:
+                    st.write(f"PE History records: {len(pe_df)}")
+                    st.write(pe_df)
+                
                 fig_pe = go.Figure()
                 
                 fig_pe.add_trace(go.Scatter(
@@ -799,7 +863,6 @@ with tab4:
                     marker=dict(size=8)
                 ))
                 
-                # Durchschnittslinie
                 avg_pe = pe_df['pe'].mean()
                 fig_pe.add_hline(
                     y=avg_pe,
@@ -809,28 +872,24 @@ with tab4:
                     annotation_position="right"
                 )
                 
-                # Benchmark Bereich (für diese Branche)
                 benchmark_yellow = benchmark["pe_range"][1]
                 benchmark_red = benchmark["pe_range"][2]
                 
                 fig_pe.add_hspan(
                     y0=0, y1=benchmark_yellow,
-                    fillcolor="green", opacity=0.1,
-                    annotation_text="🟢 Günstig", annotation_position="left"
+                    fillcolor="green", opacity=0.1
                 )
                 fig_pe.add_hspan(
                     y0=benchmark_yellow, y1=benchmark_red,
-                    fillcolor="yellow", opacity=0.1,
-                    annotation_text="🟡 Fair", annotation_position="left"
+                    fillcolor="yellow", opacity=0.1
                 )
                 fig_pe.add_hspan(
                     y0=benchmark_red, y1=max(pe_df['pe'].max() * 1.1, 100),
-                    fillcolor="red", opacity=0.1,
-                    annotation_text="🔴 Teuer", annotation_position="left"
+                    fillcolor="red", opacity=0.1
                 )
                 
                 fig_pe.update_layout(
-                    title=f"💎 {ticker} - KGV Historisch (mit Branche-Benchmark)",
+                    title=f"💎 {ticker} - KGV Historisch",
                     xaxis_title="Jahr",
                     yaxis_title="KGV",
                     template="plotly_dark",
@@ -842,7 +901,6 @@ with tab4:
                 
                 st.plotly_chart(fig_pe, use_container_width=True)
                 
-                # Statistiken
                 st.markdown("### 📊 KGV Statistiken")
                 
                 pe_stat_col1, pe_stat_col2, pe_stat_col3, pe_stat_col4 = st.columns(4)
@@ -856,44 +914,40 @@ with tab4:
                 
                 with pe_stat_col3:
                     min_pe = pe_df['pe'].min()
-                    st.metric("Minimum (günstig)", f"{round(min_pe, 1)}")
+                    st.metric("Minimum", f"{round(min_pe, 1)}")
                 
                 with pe_stat_col4:
                     max_pe = pe_df['pe'].max()
-                    st.metric("Maximum (teuer)", f"{round(max_pe, 1)}")
+                    st.metric("Maximum", f"{round(max_pe, 1)}")
                 
                 st.divider()
                 
-                # Bewertung
                 if current_pe < avg_pe * 0.8:
-                    st.success(f"🟢 GÜNSTIG - KGV {round(current_pe, 1)} unter 10-Jahr Schnitt ({round(avg_pe, 1)})")
+                    st.success(f"🟢 GÜNSTIG - KGV {round(current_pe, 1)} unter Schnitt ({round(avg_pe, 1)})")
                 elif current_pe < avg_pe:
-                    st.info(f"🟡 FAIR - KGV {round(current_pe, 1)} Nähe 10-Jahr Schnitt ({round(avg_pe, 1)})")
+                    st.info(f"🟡 FAIR - KGV {round(current_pe, 1)} Nähe Schnitt ({round(avg_pe, 1)})")
                 elif current_pe < avg_pe * 1.3:
-                    st.warning(f"🟠 TEUER - KGV {round(current_pe, 1)} über 10-Jahr Schnitt ({round(avg_pe, 1)})")
+                    st.warning(f"🟠 TEUER - KGV {round(current_pe, 1)} über Schnitt ({round(avg_pe, 1)})")
                 else:
-                    st.error(f"🔴 SEHR TEUER - KGV {round(current_pe, 1)} deutlich über 10-Jahr Schnitt ({round(avg_pe, 1)})")
+                    st.error(f"🔴 SEHR TEUER - KGV {round(current_pe, 1)} deutlich über Schnitt ({round(avg_pe, 1)})")
                 
-                # Branche-Vergleich
                 st.divider()
                 st.markdown(f"""
-                ### 🏭 Branche-Benchmark: {sector}
+                ### 🏭 Branche: {sector}
                 
-                - **Günstiger Bereich:** KGV < {benchmark_yellow}
-                - **Fair/Normal:** KGV {benchmark_yellow}-{benchmark_red}
+                - **Günstig:** KGV < {benchmark_yellow}
+                - **Fair:** KGV {benchmark_yellow}-{benchmark_red}
                 - **Teuer:** KGV > {benchmark_red}
-                
-                **Aktuelle Bewertung:** {round(current_pe, 1)}
                 """)
-            
             else:
-                st.warning("⚠️ Nicht genug Daten für historische KGV-Berechnung")
-        
+                st.info("ℹ️ Nicht genug Daten für KGV-Historie")
         else:
-            st.warning("⚠️ Finanzdaten nicht verfügbar")
+            st.info("ℹ️ Finanzdaten nicht verfügbar")
     
     except Exception as e:
-        st.warning(f"⚠️ Historische Bewertung nicht berechenbar: {str(e)[:50]}")
+        st.warning(f"⚠️ KGV-Historie nicht berechenbar: {str(e)[:50]}")
+        if DEBUG:
+            st.write(f"Full error: {e}")
 
 # TAB 5: BILANZDATEN
 with tab5:
@@ -902,44 +956,21 @@ with tab5:
     b1, b2, b3, b4 = st.columns(4)
     
     with b1:
-        assets = info.get('totalAssets', 0)
+        assets = safe_get_float(info, 'totalAssets')
         st.metric("Gesamtvermögen", f"${round(assets / 1e9, 1)}B" if assets > 0 else "N/A")
     
     with b2:
-        debt = info.get('totalDebt', 0)
+        debt = safe_get_float(info, 'totalDebt')
         st.metric("Gesamtschulden", f"${round(debt / 1e9, 1)}B" if debt > 0 else "N/A")
     
     with b3:
-        equity = info.get('totalEquity', 0)
+        equity = safe_get_float(info, 'totalEquity')
         st.metric("Eigenkapital", f"${round(equity / 1e9, 1)}B" if equity > 0 else "N/A")
     
     with b4:
-        quick_ratio = info.get('quickRatio', 0)
+        quick_ratio = safe_get_float(info, 'quickRatio')
         qr_color = "green" if quick_ratio > 1 else "yellow" if quick_ratio > 0.5 else "red"
         st.markdown(color_box(f"Quick Ratio: {round(quick_ratio, 2) if quick_ratio > 0 else 'N/A'}", qr_color), unsafe_allow_html=True)
-    
-    st.divider()
-    
-    b5, b6, b7, b8 = st.columns(4)
-    
-    with b5:
-        current_ratio = info.get('currentRatio', 0)
-        cr_color = "green" if current_ratio > 1.5 else "yellow" if current_ratio > 1 else "red"
-        st.markdown(color_box(f"Liquidität: {round(current_ratio, 2) if current_ratio > 0 else 'N/A'}", cr_color), unsafe_allow_html=True)
-    
-    with b6:
-        roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
-        color, desc = get_color_for_metric_with_sector(roe, "roe", sector)
-        st.markdown(color_box(f"ROE: {round(roe, 1) if roe > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
-    
-    with b7:
-        roc = info.get('returnOnCapital', 0) * 100 if info.get('returnOnCapital') else 0
-        color, desc = get_color_for_metric_with_sector(roc, "roe", sector)
-        st.markdown(color_box(f"ROIC: {round(roc, 1) if roc > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
-    
-    with b8:
-        bvps = info.get('bookValue', 0)
-        st.metric("Book Value/Share", f"${round(bvps, 2)}" if bvps > 0 else "N/A")
 
 # TAB 6: RISIKOANALYSE
 with tab6:
@@ -950,24 +981,24 @@ with tab6:
     with col_a:
         st.markdown("### 💪 Stärke-Faktoren")
         
-        gm = info.get('grossMargins', 0) * 100 if info.get('grossMargins') else 0
+        gm = safe_get_float(info, 'grossMargins') * 100 if info.get('grossMargins') else 0
         color, desc = get_color_for_metric_with_sector(gm, "margin", sector)
         st.markdown(color_box(f"Burggraben: {round(gm, 1) if gm > 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
         
-        rg = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
+        rg = safe_get_float(info, 'revenueGrowth') * 100 if info.get('revenueGrowth') else 0
         color, desc = get_color_for_metric_with_sector(rg, "growth", sector)
         st.markdown(color_box(f"Wachstum: {round(rg, 1) if rg != 0 else 'N/A'}%", color, desc), unsafe_allow_html=True)
     
     with col_b:
         st.markdown("### ⛔ Risiko-Faktoren")
         
-        de = info.get('debtToEquity', 0)
+        de = safe_get_float(info, 'debtToEquity')
         color, desc = get_color_for_metric_with_sector(de, "debt", sector)
         st.markdown(color_box(f"Schulden: {round(de, 2) if de > 0 else 'N/A'}x", color, desc), unsafe_allow_html=True)
         
-        pe = info.get('trailingPE', 0)
+        pe = safe_get_float(info, 'trailingPE')
         color, desc = get_color_for_metric_with_sector(pe, "pe", sector)
-        st.markdown(color_box(f"Bewertung (KGV): {round(pe, 1) if pe > 0 else 'N/A'}", color, desc), unsafe_allow_html=True)
+        st.markdown(color_box(f"Bewertung: {round(pe, 1) if pe > 0 else 'N/A'}", color, desc), unsafe_allow_html=True)
 
 # TAB 7: CASHFLOW
 with tab7:
@@ -976,19 +1007,20 @@ with tab7:
     c1, c2, c3, c4 = st.columns(4)
     
     with c1:
-        ocf = info.get('operatingCashflow', 0)
-        st.metric("Operating Cashflow", f"${round(ocf / 1e9, 1)}B" if ocf > 0 else "N/A")
+        ocf = safe_get_float(info, 'operatingCashflow')
+        st.metric("Operating CF", f"${round(ocf / 1e9, 1)}B" if ocf > 0 else "N/A")
     
     with c2:
-        fcf = info.get('freeCashflow', 0)
+        fcf = safe_get_float(info, 'freeCashflow')
         st.metric("Free Cashflow", f"${round(fcf / 1e9, 1)}B" if fcf > 0 else "N/A")
     
     with c3:
-        capex = info.get('capitalExpenditures', 0)
+        capex = safe_get_float(info, 'capitalExpenditures')
         st.metric("CapEx", f"${round(capex / 1e9, 1)}B" if capex > 0 else "N/A")
     
     with c4:
-        fcf_yield = (fcf / (info.get('marketCap', 1)) * 100) if info.get('marketCap', 0) > 0 else 0
+        market_cap = safe_get_float(info, 'marketCap', 1)
+        fcf_yield = (fcf / market_cap * 100) if market_cap > 0 and fcf > 0 else 0
         fcf_color = "green" if fcf_yield > 4 else "yellow" if fcf_yield > 2 else "orange"
         st.markdown(color_box(f"FCF Yield: {round(fcf_yield, 1) if fcf_yield > 0 else 'N/A'}%", fcf_color), unsafe_allow_html=True)
 
@@ -1006,8 +1038,8 @@ with tab8:
             "FCF Yield",
             "Dividend Yield",
             "Beta",
-            "52-Wochen-Hoch",
-            "52-Wochen-Tief",
+            "52W High",
+            "52W Low",
             "Debt/Equity",
             "Current Ratio",
             "Quick Ratio",
@@ -1015,35 +1047,35 @@ with tab8:
             "ROA",
             "ROIC",
             "Gross Margin",
-            "Operating Margin",
+            "Op. Margin",
             "Profit Margin",
             "Revenue Growth",
             "EPS",
-            "Dividende/Aktie"
+            "Div/Share"
         ],
         "Wert": [
             f"${round(current_price, 2)}",
-            f"${round(info.get('marketCap', 0) / 1e9, 1)}B",
-            f"{round(info.get('trailingPE', 0), 2)}",
-            f"{round(info.get('forwardPE', 0), 2)}",
-            f"${round(info.get('bookValue', 0), 2)}",
-            f"{round((info.get('freeCashflow', 0) / info.get('marketCap', 1)) * 100, 2)}%",
-            f"{round(info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0, 2)}%",
-            f"{round(info.get('beta', 0), 2)}",
-            f"${round(info.get('fiftyTwoWeekHigh', 0), 2)}",
-            f"${round(info.get('fiftyTwoWeekLow', 0), 2)}",
-            f"{round(info.get('debtToEquity', 0), 2)}",
-            f"{round(info.get('currentRatio', 0), 2)}",
-            f"{round(info.get('quickRatio', 0), 2)}",
-            f"{round(info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0, 2)}%",
-            f"{round(info.get('returnOnAssets', 0) * 100 if info.get('returnOnAssets') else 0, 2)}%",
-            f"{round(info.get('returnOnCapital', 0) * 100 if info.get('returnOnCapital') else 0, 2)}%",
-            f"{round(info.get('grossMargins', 0) * 100 if info.get('grossMargins') else 0, 2)}%",
-            f"{round(info.get('operatingMargins', 0) * 100 if info.get('operatingMargins') else 0, 2)}%",
-            f"{round(info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0, 2)}%",
-            f"{round(info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0, 2)}%",
-            f"${round(info.get('trailingEps', 0), 2)}",
-            f"${round(info.get('dividendRate', 0), 2)}" if info.get('dividendRate') else "N/A"
+            f"${round(safe_get_float(info, 'marketCap') / 1e9, 1)}B",
+            f"{round(safe_get_float(info, 'trailingPE'), 2)}",
+            f"{round(safe_get_float(info, 'forwardPE'), 2)}",
+            f"${round(safe_get_float(info, 'bookValue'), 2)}",
+            f"{round((safe_get_float(info, 'freeCashflow') / safe_get_float(info, 'marketCap', 1)) * 100, 2)}%",
+            f"{round(safe_get_float(info, 'dividendYield') * 100 if info.get('dividendYield') else 0, 2)}%",
+            f"{round(safe_get_float(info, 'beta'), 2)}",
+            f"${round(safe_get_float(info, 'fiftyTwoWeekHigh'), 2)}",
+            f"${round(safe_get_float(info, 'fiftyTwoWeekLow'), 2)}",
+            f"{round(safe_get_float(info, 'debtToEquity'), 2)}",
+            f"{round(safe_get_float(info, 'currentRatio'), 2)}",
+            f"{round(safe_get_float(info, 'quickRatio'), 2)}",
+            f"{round(safe_get_float(info, 'returnOnEquity') * 100 if info.get('returnOnEquity') else 0, 2)}%",
+            f"{round(safe_get_float(info, 'returnOnAssets') * 100 if info.get('returnOnAssets') else 0, 2)}%",
+            f"{round(safe_get_float(info, 'returnOnCapital') * 100 if info.get('returnOnCapital') else 0, 2)}%",
+            f"{round(safe_get_float(info, 'grossMargins') * 100 if info.get('grossMargins') else 0, 2)}%",
+            f"{round(safe_get_float(info, 'operatingMargins') * 100 if info.get('operatingMargins') else 0, 2)}%",
+            f"{round(safe_get_float(info, 'profitMargins') * 100 if info.get('profitMargins') else 0, 2)}%",
+            f"{round(safe_get_float(info, 'revenueGrowth') * 100 if info.get('revenueGrowth') else 0, 2)}%",
+            f"${round(safe_get_float(info, 'trailingEps'), 2)}",
+            f"${round(safe_get_float(info, 'dividendRate'), 2)}" if info.get('dividendRate') else "N/A"
         ]
     }
     
@@ -1056,5 +1088,14 @@ st.markdown(f"""
 📊 **Datenquelle:** Yahoo Finance  
 🏭 **Sektor:** {sector}  
 📅 **Stand:** {datetime.now().strftime('%d.%m.%Y %H:%M')}  
-⚠️ **Disclaimer:** Keine Anlageberatung | Nur zu Informationszwecken
+⚠️ **Disclaimer:** Keine Anlageberatung
 """)
+
+if DEBUG:
+    st.divider()
+    st.markdown("### 🔧 DEBUG INFO")
+    with st.expander("Debug Informationen"):
+        st.write("**Keys in info dict:**")
+        st.write(list(info.keys())[:20])
+        st.write("\n**Data Summary:**")
+        st.write(data.describe() if data is not None else "None")
