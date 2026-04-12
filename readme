@@ -1,0 +1,20 @@
+# 🛡️ Vigilanz-Cockpit
+
+Investment Quality Analysis Tool
+
+## Features
+
+- 📊 Echtzeit-Kennzahlen
+- 📈 5-Jahres-Charts
+- ⚖️ Risiko-Analyse
+- 💰 Fundamentale Metriken
+
+## Wie nutzen?
+
+1. Ticker eingeben (z.B. MSFT)
+2. Warte auf Datenladung
+3. Analysiere die Kennzahlen
+
+## Datenquelle
+
+Yahoo Finance
