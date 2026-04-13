@@ -10,16 +10,14 @@ layout=‘wide’,
 initial_sidebar_state=‘collapsed’
 )
 
-st.markdown(”””
-
-<style>
-    .main { background: #0a0e27; color: #e8eef7; }
-    h1 { font-size: 1.8rem; margin-bottom: 0.3rem; }
-    .stTabs [data-baseweb="tab"] { font-size: 0.95rem; padding: 10px 14px; }
-    @media (max-width: 640px) { h1 { font-size: 1.6rem; } }
-</style>
-
-“””, unsafe_allow_html=True)
+st.markdown(
+‘<style>’
+‘.main { background: #0a0e27; color: #e8eef7; }’
+‘h1 { font-size: 1.8rem; margin-bottom: 0.3rem; }’
+‘@media (max-width: 640px) { h1 { font-size: 1.6rem; } }’
+‘</style>’,
+unsafe_allow_html=True
+)
 
 st.title(‘Aktien-Tool Baeumer’)
 st.caption(‘Operative Exzellenz - Faire Bewertung - Langfristige Qualitaet’)
@@ -112,8 +110,6 @@ except Exception as e:
     st.stop()
 ```
 
-# Score
-
 rule_pts   = 18 if rule_of_40 > 35 else 6
 fcf_pts    = 12 if fcf_yield > 2  else 4
 margin_pts = 10 if gross_margin > 50 else 5
@@ -123,11 +119,11 @@ debt_pen   = -8  if debt_to_equity > 2.0 else 0
 beta_pen   = -7  if beta > 1.6 else 0
 score = max(0, min(rule_pts + fcf_pts + margin_pts + bonus_pts + pe_pen + debt_pen + beta_pen, 45))
 
-status = ‘ELITE-QUALITAET’ if score >= 36 else ‘Gute Qualitaet’ if score >= 28 else ‘Vorsicht’ if score >= 18 else ‘Erhebliche Bedenken’
+status = ‘ELITE’ if score >= 36 else ‘Gut’ if score >= 28 else ‘Vorsicht’ if score >= 18 else ‘Bedenken’
 hx = ‘#22c55e’ if score >= 28 else ‘#f97316’ if score >= 18 else ‘#ef4444’
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-‘Ueberblick’, ‘Growth Chart’, ‘Finanzentwicklung’, ‘Bilanz & Struktur’, ‘Bewertung & Risiko’
+‘Ueberblick’, ‘Growth Chart’, ‘Finanzen’, ‘Bilanz’, ‘Bewertung’
 ])
 
 with tab1:
@@ -140,14 +136,14 @@ st.caption(’Sektor: ’ + sector)
 
 ```
 score_box = (
-    '<div style="background:#1a2338;padding:1.5rem;border-radius:14px;'
-    'text-align:center;border:2px solid ' + hx + ';">'
-    '<h2 style="color:' + hx + '">' + str(score) + '/45</h2>'
-    '<p style="font-size:1.15rem;">' + status + '</p></div>'
+    '<div style=background:#1a2338;padding:1.5rem;border-radius:14px;'
+    'text-align:center;border:2px solid ' + hx + ';>'
+    '<h2 style=color:' + hx + ';>' + str(score) + '/45</h2>'
+    '<p style=font-size:1.15rem;>' + status + '</p></div>'
 )
 st.markdown(score_box, unsafe_allow_html=True)
 
-with st.expander('Score-Breakdown anzeigen'):
+with st.expander('Score-Breakdown'):
     st.write('Rule of 40 (' + f'{rule_of_40:.1f}' + '%) -> ' + str(rule_pts) + ' Punkte')
     st.write('FCF Yield (' + f'{fcf_yield:.1f}' + '%) -> ' + str(fcf_pts) + ' Punkte')
     st.write('Bruttomarge (' + f'{gross_margin:.1f}' + '%) -> ' + str(margin_pts) + ' Punkte')
@@ -204,7 +200,7 @@ fig.update_layout(
     margin=dict(l=10, r=10, t=30, b=10)
 )
 st.plotly_chart(fig, use_container_width=True)
-st.caption('Gruen: Kaufzone (unter EMA 200) | Rot: Teuer (ueber EMA 200)')
+st.caption('Gruen: Kaufzone | Rot: Teuer')
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -219,7 +215,7 @@ with c3:
 ```
 
 with tab3:
-st.subheader(‘Finanzentwicklung’)
+st.subheader(‘Finanzen’)
 c1, c2 = st.columns(2)
 with c1:
 st.metric(‘Op. Cashflow’, fmt_b(operating_cf))
@@ -230,7 +226,6 @@ st.metric(‘EPS’, ‘$’ + f’{trailing_eps:.2f}’ if trailing_eps else �
 st.metric(‘Umsatzwachstum’, f’{rev_growth:.1f}’ + ‘%’)
 st.metric(‘FCF Yield’, f’{fcf_yield:.1f}’ + ‘%’)
 st.divider()
-st.subheader(‘Margen’)
 c1, c2, c3 = st.columns(3)
 with c1: st.metric(‘Bruttomarge’, f’{gross_margin:.1f}’ + ‘%’)
 with c2: st.metric(‘Op. Marge’, f’{op_margin:.1f}’ + ‘%’)
@@ -253,7 +248,7 @@ with c2: st.metric(‘ROA’, f’{roa:.1f}’ + ‘%’ if roa else ‘N/A’)
 with c3: st.metric(‘Dividende’, f’{div_yield:.2f}’ + ‘%’ if div_yield > 0 else ‘Keine’)
 
 with tab4:
-st.subheader(‘Bilanz & Struktur’)
+st.subheader(‘Bilanz’)
 net_debt = total_debt - total_cash
 c1, c2, c3 = st.columns(3)
 with c1: st.metric(‘Schulden’, fmt_b(total_debt))
@@ -289,44 +284,42 @@ c1, c2, c3 = st.columns(3)
 with c1: st.metric(‘P/S’, f’{price_to_sales:.1f}’ + ‘x’ if price_to_sales > 0 else ‘N/A’)
 with c2: st.metric(‘P/B’, f’{price_to_book:.1f}’ + ‘x’ if price_to_book > 0 else ‘N/A’)
 with c3: st.metric(‘EV/EBITDA’, f’{ev_to_ebitda:.1f}’ + ‘x’ if ev_to_ebitda > 0 else ‘N/A’)
-st.markdown(‘Branchenuebliches KGV: ’ + (‘25-35’ if ‘Technology’ in sector else ‘15-25’))
 if pe_to_use > 70:
-st.warning(‘Sehr hohes KGV - Wachstumsnarrativ muss perfekt bleiben.’)
+st.warning(‘Sehr hohes KGV’)
 elif pe_to_use > 50:
-st.warning(‘Erhoehtes KGV - wenig Spielraum fuer Enttaeuschungen.’)
+st.warning(‘Erhoehtes KGV’)
 elif pe_to_use > 0:
-st.success(‘Bewertung im vernuenftigen Bereich.’)
+st.success(‘Faire Bewertung’)
 st.divider()
 st.subheader(‘Risiko-Ampel’)
 def ampel(g, y, lg, ly, lr):
 icon = ‘GRUEN’ if g else ‘GELB’ if y else ‘ROT’
 st.markdown(icon + ’ ’ + (lg if g else ly if y else lr))
-ampel(beta < 1.2, beta < 1.6,
+ampel(beta<1.2, beta<1.6,
 ‘Stabile Aktie (Beta ’ + f’{beta:.2f}’ + ‘)’,
 ‘Moderate Volatilitaet (Beta ’ + f’{beta:.2f}’ + ‘)’,
 ‘Hohe Volatilitaet (Beta ’ + f’{beta:.2f}’ + ‘)’)
-ampel(0 < pe_to_use <= 30, pe_to_use <= 50,
+ampel(0<pe_to_use<=30, pe_to_use<=50,
 ‘Faire Bewertung (P/E ’ + f’{pe_to_use:.1f}’ + ‘x)’,
 ‘Erhoeht (P/E ’ + f’{pe_to_use:.1f}’ + ‘x)’,
-‘Sehr teuer (P/E ’ + f’{pe_to_use:.1f}’ + ‘x)’ if pe_to_use > 0 else ‘P/E N/A’)
-ampel(debt_to_equity < 1, debt_to_equity < 2,
+‘Teuer (P/E ’ + f’{pe_to_use:.1f}’ + ‘x)’ if pe_to_use > 0 else ‘P/E N/A’)
+ampel(debt_to_equity<1, debt_to_equity<2,
 ‘Geringe Schulden (D/E ’ + f’{debt_to_equity:.2f}’ + ‘x)’,
 ‘Moderate Schulden (D/E ’ + f’{debt_to_equity:.2f}’ + ‘x)’,
 ‘Hohe Schulden (D/E ’ + f’{debt_to_equity:.2f}’ + ‘x)’ if debt_to_equity > 0 else ‘D/E N/A’)
-ampel(gross_margin > 55, gross_margin > 30,
+ampel(gross_margin>55, gross_margin>30,
 ‘Starke Marge (’ + f’{gross_margin:.1f}’ + ‘%)’,
 ‘Mittlere Marge (’ + f’{gross_margin:.1f}’ + ‘%)’,
 ‘Schwache Marge (’ + f’{gross_margin:.1f}’ + ‘%)’)
-ampel(rule_of_40 > 50, rule_of_40 > 35,
+ampel(rule_of_40>50, rule_of_40>35,
 ‘Exzellente Rule of 40 (’ + f’{rule_of_40:.1f}’ + ‘%)’,
-‘Rule of 40 erfuellt (’ + f’{rule_of_40:.1f}’ + ‘%)’,
-‘Rule of 40 nicht erfuellt (’ + f’{rule_of_40:.1f}’ + ‘%)’)
+‘Rule of 40 ok (’ + f’{rule_of_40:.1f}’ + ‘%)’,
+‘Rule of 40 schwach (’ + f’{rule_of_40:.1f}’ + ‘%)’)
 st.divider()
 final_box = (
-‘<div style="background:#1a2338;padding:1.1rem;border-radius:12px;'
-'border-left:4px solid ' + hx + ';">’
-’<strong>Gesamtbewertung: ’ + str(score) + ’/45 - ’ + status + ‘</strong><br>’
-‘<span style="color:#94a3b8;font-size:0.88rem;">Keine Anlageberatung - rein informativ.</span>’
+‘<div style=background:#1a2338;padding:1.1rem;border-radius:12px;’
+’border-left:4px solid ’ + hx + ‘;>’
+’<b>Gesamtbewertung: ’ + str(score) + ’/45 - ’ + status + ‘</b>’
 ‘</div>’
 )
 st.markdown(final_box, unsafe_allow_html=True)
