@@ -70,7 +70,7 @@ with st.spinner(f"Lade {ticker}..."):
     try:
         info, hist = load_stock_data(ticker)
         
-        if hist.empty or len(info) < 5:   # <5 Felder = praktisch keine Daten
+        if hist.empty or len(info) < 5:
             st.error("Keine Daten für diesen Ticker gefunden. Bitte anderen probieren.")
             st.stop()
 
@@ -78,7 +78,6 @@ with st.spinner(f"Lade {ticker}..."):
         company_name = info.get('longName', ticker)
         sector = info.get('sector', 'Unbekannt')
 
-        # Sichere Kennzahlen
         market_cap = info.get('marketCap', 0) or 1
         fcf = info.get('freeCashflow', 0) or 0
         fcf_yield = (fcf / market_cap * 100) if market_cap > 0 else 0
@@ -142,7 +141,7 @@ with tab1:
 
 with tab2:
     st.subheader("📈 5-Jahres-Growth Chart")
-    hist = hist.copy()  # Sicherheit für Rolling
+    hist = hist.copy()
     hist['EMA200'] = hist['Close'].rolling(window=200).mean()
     last_ema = hist['EMA200'].iloc[-1] if not pd.isna(hist['EMA200'].iloc[-1]) else current_price
 
@@ -151,4 +150,42 @@ with tab2:
     fig.add_trace(go.Scatter(x=hist.index, y=hist['EMA200'], name='EMA 200', line=dict(color='#fbbf24', dash='dot')))
 
     fig.add_hrect(y0=0, y1=last_ema, fillcolor="rgba(34,197,94,0.18)", line_width=0, annotation_text="🟢 Kaufzone")
-    fig.add_hrect(y0=last_ema,
+    fig.add_hrect(y0=last_ema, y1=hist['Close'].max()*1.35, fillcolor="rgba(239,68,68,0.18)", line_width=0, annotation_text="🔴 Zu teuer")
+
+    fig.update_layout(height=460, template="plotly_dark", yaxis_type="log", hovermode="x unified")
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("🟢 Unter EMA 200 = Kaufzone | 🔴 Über EMA 200 = Zu teuer")
+
+with tab3:
+    st.subheader("💰 Finanzentwicklung")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.metric("Oper. Cashflow", f"${info.get('operatingCashflow', 0)/1e9:.1f} Mrd")
+        st.metric("Free Cash Flow", f"${info.get('freeCashflow', 0)/1e9:.1f} Mrd")
+    with c2:
+        st.metric("Gewinn je Aktie", f"${info.get('trailingEps', 0):.2f}")
+        st.metric("Umsatz je Aktie", "N/A")
+
+with tab4:
+    st.subheader("📋 Bilanz & Struktur")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.metric("Bruttomarge", f"{round(gross_margin, 1)}%")
+        st.metric("Debt/Equity", f"{round(debt_to_equity, 2)}×")
+    with c2:
+        st.metric("Beta", f"{round(beta, 2)}")
+        st.metric("Aktienanzahl", f"{shares_outstanding:.1f} Mio" if shares_outstanding > 0 else "N/A")
+    st.markdown(f"**[Zur originalen Bilanz auf Yahoo Finance](https://finance.yahoo.com/quote/{ticker}/balance-sheet)**", unsafe_allow_html=True)
+
+with tab5:
+    st.subheader("⚖️ Bewertung & Risiko")
+    st.metric("Trailing P/E", f"{round(trailing_pe, 1)}" if trailing_pe > 0 else "N/A")
+    st.metric("Forward P/E", f"{round(forward_pe, 1)}" if forward_pe > 0 else "N/A")
+    st.metric("Branchen-typisch", "25–35" if "Technology" in sector else "15–25")
+
+    if pe_to_use > 50:
+        st.warning("Hohes KGV → Das Narrativ muss perfekt bleiben")
+    else:
+        st.success("Bewertung im vernünftigen Bereich")
+
+st.caption("Daten von Yahoo Finance • Stand: gerade eben • Keine Anlageberatung")
