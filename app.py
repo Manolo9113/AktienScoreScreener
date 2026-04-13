@@ -78,6 +78,9 @@ with st.spinner(f"Lade {ticker}..."):
         company_name = info.get('longName', ticker)
         sector = info.get('sector', 'Unbekannt')
 
+        # Tages-Performance (für den neuen Metric)
+        daily_change_pct = hist['Close'].pct_change().iloc[-1] * 100 if len(hist) > 1 else 0
+
         market_cap = info.get('marketCap', 0) or 1
         fcf = info.get('freeCashflow', 0) or 0
         fcf_yield = (fcf / market_cap * 100) if market_cap > 0 else 0
@@ -98,21 +101,17 @@ with st.spinner(f"Lade {ticker}..."):
         st.error(f"Fehler beim Laden von {ticker}: {str(e)[:120]}")
         st.stop()
 
-# ==================== SCORE ====================
-score = 0
-if rule_of_40 > 40: score += 18
-else: score += 6
-if fcf_yield > 3: score += 12
-else: score += 4
-if gross_margin > 55: score += 10
-else: score += 5
-if rule_of_40 > 50: score += 5
+# ==================== NEUER, WEICHERER & TRANSPARENTER SCORE ====================
+rule_points = 18 if rule_of_40 > 35 else 6
+fcf_points = 12 if fcf_yield > 2 else 4
+margin_points = 10 if gross_margin > 50 else 5
+rule_bonus = 5 if rule_of_40 > 45 else 0
 
-if pe_to_use > 65: score -= 16
-elif pe_to_use > 45: score -= 9
-if debt_to_equity > 2.0: score -= 8
-if beta > 1.6: score -= 7
+pe_penalty = -16 if pe_to_use > 70 else -9 if pe_to_use > 50 else 0
+debt_penalty = -8 if debt_to_equity > 2.0 else 0
+beta_penalty = -7 if beta > 1.6 else 0
 
+score = rule_points + fcf_points + margin_points + rule_bonus + pe_penalty + debt_penalty + beta_penalty
 score = max(0, min(score, 45))
 
 status = "🚀 ELITE-QUALITÄT" if score >= 36 else "✅ Gute Qualität" if score >= 28 else "🟡 Vorsicht" if score >= 18 else "🔴 Erhebliche Bedenken"
@@ -125,14 +124,31 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 with tab1:
-    st.subheader(f"{company_name} ({ticker})")
+    # NEU: Aktueller Kurs + Tages-Performance direkt oben
+    st.metric(
+        label=f"**{company_name} ({ticker})**",
+        value=f"${current_price:,.2f}",
+        delta=f"{daily_change_pct:+.2f}% heute"
+    )
     st.caption(f"Sektor: {sector}")
+
+    # Score-Box
     st.markdown(f"""
     <div style="background:#1a2338; padding:1.5rem; border-radius:14px; text-align:center; border:2px solid {'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">
         <h2 style="margin:0; color:{'#22c55e' if color=='green' else '#f97316' if color=='orange' else '#ef4444'}">{score}/45</h2>
         <p style="margin:0.4rem 0 0 0; font-size:1.15rem;">{status}</p>
     </div>
     """, unsafe_allow_html=True)
+
+    # NEU: Score-Breakdown (transparent)
+    with st.expander("📊 Warum genau diese Punktzahl? (Score-Breakdown)"):
+        st.write(f"**Rule of 40** ({round(rule_of_40,1)}%) → **{rule_points} Punkte**")
+        st.write(f"**FCF Yield** ({round(fcf_yield,1)}%) → **{fcf_points} Punkte**")
+        st.write(f"**Bruttomarge** ({round(gross_margin,1)}%) → **{margin_points} Punkte**")
+        st.write(f"Rule of 40 > 45% → **{rule_bonus} Bonus-Punkte**")
+        st.write(f"**KGV** ({round(pe_to_use,1)}) → **{pe_penalty} Punkte**")
+        st.write(f"**Debt/Equity** ({round(debt_to_equity,2)}×) → **{debt_penalty} Punkte**")
+        st.write(f"**Beta** ({round(beta,2)}) → **{beta_penalty} Punkte**")
 
     c1, c2, c3 = st.columns(3)
     with c1: st.metric("Rule of 40", f"{round(rule_of_40, 1)}%")
@@ -149,12 +165,37 @@ with tab2:
     fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'], name='Kurs', line=dict(color='#60a5fa', width=2.5)))
     fig.add_trace(go.Scatter(x=hist.index, y=hist['EMA200'], name='EMA 200', line=dict(color='#fbbf24', dash='dot')))
 
-    fig.add_hrect(y0=0, y1=last_ema, fillcolor="rgba(34,197,94,0.18)", line_width=0, annotation_text="🟢 Kaufzone")
-    fig.add_hrect(y0=last_ema, y1=hist['Close'].max()*1.35, fillcolor="rgba(239,68,68,0.18)", line_width=0, annotation_text="🔴 Zu teuer")
+    # NEU: realistische, lineare Zonen (kein Log mehr!)
+    fig.add_hrect(
+        y0=last_ema * 0.82, y1=last_ema,
+        fillcolor="rgba(34,197,94,0.22)", line_width=0,
+        annotation_text="🟢 Kaufzone (unterstützt)"
+    )
+    fig.add_hrect(
+        y0=last_ema, y1=hist['Close'].max() * 1.12,
+        fillcolor="rgba(239,68,68,0.22)", line_width=0,
+        annotation_text="🔴 Teuer / Verkaufszone"
+    )
 
-    fig.update_layout(height=460, template="plotly_dark", yaxis_type="log", hovermode="x unified")
+    # NEU: Aktueller Kurs als dicke Linie
+    fig.add_hline(
+        y=current_price,
+        line_dash="dash",
+        line_color="#60a5fa",
+        line_width=2.5,
+        annotation_text=f"Aktueller Kurs ${current_price:,.2f}",
+        annotation_position="top right"
+    )
+
+    fig.update_layout(
+        height=480,
+        template="plotly_dark",
+        yaxis_type="linear",          # ← jetzt linear → viel schöner!
+        hovermode="x unified",
+        xaxis_rangeslider_visible=True
+    )
     st.plotly_chart(fig, use_container_width=True)
-    st.caption("🟢 Unter EMA 200 = Kaufzone | 🔴 Über EMA 200 = Zu teuer")
+    st.caption("🟢 Unter ~18 % der EMA 200 = Kaufzone | 🔴 Über EMA 200 = Teuer")
 
 with tab3:
     st.subheader("💰 Finanzentwicklung")
